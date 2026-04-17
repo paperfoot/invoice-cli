@@ -80,7 +80,7 @@ cargo install invoice-cli
 ### From source
 
 ```
-git clone https://github.com/199-biotechnologies/invoice-cli
+git clone https://github.com/paperfoot/invoice-cli
 cd invoice-cli
 cargo install --path .
 ```
