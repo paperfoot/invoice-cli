@@ -24,22 +24,38 @@ interface built for agents.
 
 - **Multi-issuer first-class.** Run several companies (SG Pte. Ltd., UK Ltd.,
   US LLC, …) from one binary. Each issuer has its own jurisdiction, tax
-  profile, default template, and numbering series.
+  profile, default template, numbering series, and logo.
 - **Per-client defaults.** Pin a default issuer and/or template per client —
   then just `invoice invoices new --client meridian --item design` and the
   right entity + branding lights up automatically.
 - **International tax profiles.** Built-in: Singapore GST 9%, UK VAT 20%,
   US (state-variable), EU VAT, plus a `custom` profile. Reverse-charge flag
-  for EU cross-border B2B.
+  for EU cross-border B2B — rendered on the PDF with the legally-required
+  callout.
 - **Precise money math.** Amounts stored as `i64` minor units; tax math uses
-  `rust_decimal` — no float rounding artefacts.
+  `rust_decimal` — no float rounding artefacts. Discount math clamped at
+  zero so a mis-sized fixed discount can't flip totals negative.
+- **Discounts** at line or invoice level (rate or fixed amount).
 - **Five polished Typst templates** out of the box: `vienna`, `helvetica-nera`,
   `tiefletter-gold`, `monoline`, `boutique`. Self-contained — single binary,
   templates are embedded and extracted on first use.
+- **Logos per issuer.** Attach a PNG/SVG/JPG and each template renders it in
+  the header at the appropriate size for its design language.
+- **Credit notes.** Issue against any existing invoice with `credit-note
+  --full` (full reversal) or `--item ...` (specific refund lines). Independent
+  `CN-YYYY-NNNN` numbering series so credit notes don't collide with invoices.
+- **Draft-only editing.** Amend a draft's metadata with `invoices edit` or
+  its line items with `invoices items add|remove|edit`. Once issued, invoices
+  are immutable — the correct path for corrections is a credit note, which
+  preserves the audit trail and number-sequence integrity required by
+  SG/EU/UK regulations.
 - **QR pay-links.** Set `--pay-link https://buy.stripe.com/...` on an invoice
   and the renderer stamps a scan-to-pay QR on the PDF.
 - **Lifecycle timestamps.** `mark issued` / `mark paid` auto-stamp
   `issued_at` / `paid_at` (idempotent, first-transition-only).
+- **Aging + CSV export.** `invoices aging` buckets unpaid invoices into
+  0-30/31-60/61-90/90+ days overdue. `invoices export --from X --to Y
+  --format csv` gives you a clean accountant handoff.
 - **Agent-friendly.** Every command emits a JSON envelope when piped or
   `--json`; `invoice agent-info` returns a capability manifest; structured
   error codes with suggestions; exit codes distinguish transient vs permanent
@@ -75,11 +91,12 @@ dependency (`brew install typst` on macOS).
 ## Quick start
 
 ```
-# 1. Register your billing entity
+# 1. Register your billing entity (with logo + bank details)
 invoice issuer add acme \
     --name "Acme Studio" --jurisdiction sg --tax-registered \
     --tax-id "M2-1234567-8" --address "1 Marina Bay\nSingapore 018989" \
-    --template boutique
+    --template boutique --logo ~/Pictures/acme.png \
+    --bank-name "DBS" --bank-iban "SG11DBSS..." --bank-bic "DBSSSGSG"
 
 # 2. Add a client, pinning acme as their default issuer
 invoice clients add meridian \
@@ -101,6 +118,12 @@ invoice invoices render 2026-0001 --open
 # 6. Later: mark paid, clone for next month
 invoice invoices mark 2026-0001 paid
 invoice invoices duplicate 2026-0001
+
+# 7. Need a refund? Credit note against the original:
+invoice invoices credit-note 2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
+
+# 8. Month-end accountant handoff
+invoice invoices export --from 2026-01-01 --to 2026-03-31 --format csv --out q1.csv
 ```
 
 ## Core commands
@@ -114,10 +137,16 @@ invoice invoices duplicate 2026-0001
 | `clients set-template <slug> <tmpl>` | Pin default template for a client |
 | `products add\|edit\|list\|show\|delete` | Manage reusable line items |
 | `invoices new --client X --item Y` | Create a new invoice |
+| `invoices edit <number>` | Edit draft metadata (due, terms, notes, discount…) |
+| `invoices items add\|remove\|edit <number>` | Mutate line items on a draft invoice |
 | `invoices duplicate <number>` | Clone an invoice as a fresh draft (recurring billing) |
+| `invoices credit-note <number>` | Issue a credit note against an existing invoice |
 | `invoices render <number> [--template T] [--open]` | Generate PDF |
 | `invoices mark <number> draft\|issued\|paid\|void` | Update status (auto-stamps timestamps) |
-| `invoices list [--status X] [--as Y]` | List invoices with totals |
+| `invoices list [--status X] [--as Y] [--overdue]` | List invoices with totals |
+| `invoices aging [--as Y]` | Aging buckets for unpaid invoices |
+| `invoices export --from X --to Y --format csv\|json` | Accountant handoff |
+| `invoices delete <number> [--force]` | Delete an invoice (`--force` for non-draft) |
 | `template list\|preview <name>` | Inspect available templates |
 | `doctor` | Diagnose typst install, DB, templates |
 | `agent-info` | Full JSON capability manifest |
