@@ -1,0 +1,19 @@
+target/
+Cargo.lock.bak
+*.pdf
+.DS_Store
+*.swp
+.env
+.envrc
+
+# Agent tooling caches / local config
+.claude/
+
+# Dev scratch — synthetic previews regenerate via `invoice template preview`
+previews/
+
+# Never commit user state / config
+state/
+config.toml
+*.db
+*.db-*

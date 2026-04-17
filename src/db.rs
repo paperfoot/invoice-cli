@@ -1,0 +1,752 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Database layer — SQLite via rusqlite, migrations via refinery.
+// ═══════════════════════════════════════════════════════════════════════════
+
+use rusqlite::{params, Connection, OptionalExtension};
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
+use std::str::FromStr;
+
+use crate::config;
+use crate::error::{AppError, Result};
+use crate::money::MinorUnits;
+use crate::tax::Jurisdiction;
+
+mod embedded {
+    use refinery::embed_migrations;
+    embed_migrations!("./migrations");
+}
+
+pub fn open() -> Result<Connection> {
+    let path = config::db_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut conn = Connection::open(&path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    embedded::migrations::runner()
+        .run(&mut conn)
+        .map_err(AppError::Migration)?;
+    Ok(conn)
+}
+
+pub fn open_at(path: &Path) -> Result<Connection> {
+    let mut conn = Connection::open(path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    embedded::migrations::runner()
+        .run(&mut conn)
+        .map_err(AppError::Migration)?;
+    Ok(conn)
+}
+
+// ─── Domain types ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Issuer {
+    pub id: i64,
+    pub slug: String,
+    pub name: String,
+    pub legal_name: Option<String>,
+    pub jurisdiction: Jurisdiction,
+    pub tax_registered: bool,
+    pub tax_id: Option<String>,
+    pub company_no: Option<String>,
+    pub tagline: Option<String>,
+    pub address: Vec<String>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub bank_name: Option<String>,
+    pub bank_iban: Option<String>,
+    pub bank_bic: Option<String>,
+    pub default_template: String,
+    pub currency: Option<String>,
+    pub symbol: Option<String>,
+    pub number_format: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Client {
+    pub id: i64,
+    pub slug: String,
+    pub name: String,
+    pub attn: Option<String>,
+    pub country: Option<String>,
+    pub tax_id: Option<String>,
+    pub address: Vec<String>,
+    pub email: Option<String>,
+    pub notes: Option<String>,
+    /// If set, `invoices new` defaults `--as` to this issuer slug when omitted.
+    pub default_issuer_slug: Option<String>,
+    /// If set, render uses this template before falling back to the issuer's
+    /// default_template. Explicit `--template` CLI flag still wins.
+    pub default_template: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Product {
+    pub id: i64,
+    pub slug: String,
+    pub description: String,
+    pub subtitle: Option<String>,
+    pub unit: String,
+    pub unit_price: MinorUnits,
+    pub currency: String,
+    pub tax_rate: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Invoice {
+    pub id: i64,
+    pub number: String,
+    pub issuer_id: i64,
+    pub client_id: i64,
+    pub issue_date: String,
+    pub due_date: String,
+    pub terms: String,
+    pub currency: String,
+    pub symbol: String,
+    pub tax_label: String,
+    pub status: String,
+    pub notes: Option<String>,
+    pub reverse_charge: bool,
+    /// Optional URL (Stripe Payment Link, EPC-QR payload, any URL) that the
+    /// renderer encodes as a QR code on the PDF.
+    pub pay_link: Option<String>,
+    /// Timestamp (ISO-8601) when the invoice was first marked 'issued'.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub issued_at: Option<String>,
+    /// Timestamp (ISO-8601) when the invoice was first marked 'paid'.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paid_at: Option<String>,
+    /// Grand total in minor units. Only populated by `invoice_list`, not by
+    /// `invoice_get` (which returns all items so callers can sum themselves).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_minor: Option<i64>,
+    pub items: Vec<InvoiceItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvoiceItem {
+    pub id: i64,
+    pub invoice_id: i64,
+    pub position: i64,
+    pub description: String,
+    pub subtitle: Option<String>,
+    pub qty: Decimal,
+    pub unit: String,
+    pub unit_price: MinorUnits,
+    pub tax_rate: Decimal,
+    pub product_id: Option<i64>,
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
+
+fn addr_to_text(lines: &[String]) -> String {
+    lines.join("\n")
+}
+fn text_to_addr(s: &str) -> Vec<String> {
+    s.split('\n').map(|l| l.to_string()).collect()
+}
+
+// ─── Issuers ─────────────────────────────────────────────────────────────
+
+pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO issuers (slug, name, legal_name, jurisdiction, tax_registered,
+                              tax_id, company_no, tagline, address, email, phone,
+                              bank_name, bank_iban, bank_bic, default_template,
+                              currency, symbol, number_format)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        params![
+            issuer.slug,
+            issuer.name,
+            issuer.legal_name,
+            issuer.jurisdiction.as_str(),
+            issuer.tax_registered as i32,
+            issuer.tax_id,
+            issuer.company_no,
+            issuer.tagline,
+            addr_to_text(&issuer.address),
+            issuer.email,
+            issuer.phone,
+            issuer.bank_name,
+            issuer.bank_iban,
+            issuer.bank_bic,
+            issuer.default_template,
+            issuer.currency,
+            issuer.symbol,
+            issuer.number_format,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, slug, name, legal_name, jurisdiction, tax_registered,
+                tax_id, company_no, tagline, address, email, phone,
+                bank_name, bank_iban, bank_bic, default_template,
+                currency, symbol, number_format
+         FROM issuers ORDER BY slug",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Issuer {
+                id: row.get(0)?,
+                slug: row.get(1)?,
+                name: row.get(2)?,
+                legal_name: row.get(3)?,
+                jurisdiction: Jurisdiction::from_str(&row.get::<_, String>(4)?)
+                    .unwrap_or(Jurisdiction::Custom),
+                tax_registered: row.get::<_, i32>(5)? != 0,
+                tax_id: row.get(6)?,
+                company_no: row.get(7)?,
+                tagline: row.get(8)?,
+                address: text_to_addr(&row.get::<_, String>(9)?),
+                email: row.get(10)?,
+                phone: row.get(11)?,
+                bank_name: row.get(12)?,
+                bank_iban: row.get(13)?,
+                bank_bic: row.get(14)?,
+                default_template: row.get(15)?,
+                currency: row.get(16)?,
+                symbol: row.get(17)?,
+                number_format: row.get(18)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn issuer_by_slug(conn: &Connection, slug: &str) -> Result<Issuer> {
+    // Exact match first
+    for i in issuer_list(conn)? {
+        if i.slug == slug {
+            return Ok(i);
+        }
+    }
+    // Fuzzy fallback (substring on slug or case-insensitive contains on name)
+    let lower = slug.to_lowercase();
+    let matches: Vec<Issuer> = issuer_list(conn)?
+        .into_iter()
+        .filter(|i| i.slug.contains(slug) || i.name.to_lowercase().contains(&lower))
+        .collect();
+    match matches.len() {
+        0 => Err(AppError::NotFound(format!("issuer '{slug}'"))),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => Err(AppError::Ambiguous(format!(
+            "issuer '{slug}' matches {}",
+            matches
+                .iter()
+                .map(|m| m.slug.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+pub fn issuer_delete(conn: &Connection, slug: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM issuers WHERE slug = ?1", params![slug])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("issuer '{slug}'")));
+    }
+    Ok(())
+}
+
+/// Full-replace UPDATE. Matches by slug (PK-like). Slug itself cannot change.
+pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE issuers SET
+             name = ?1, legal_name = ?2, jurisdiction = ?3, tax_registered = ?4,
+             tax_id = ?5, company_no = ?6, tagline = ?7, address = ?8,
+             email = ?9, phone = ?10, bank_name = ?11, bank_iban = ?12,
+             bank_bic = ?13, default_template = ?14, currency = ?15,
+             symbol = ?16, number_format = ?17
+         WHERE slug = ?18",
+        params![
+            issuer.name,
+            issuer.legal_name,
+            issuer.jurisdiction.as_str(),
+            issuer.tax_registered as i32,
+            issuer.tax_id,
+            issuer.company_no,
+            issuer.tagline,
+            addr_to_text(&issuer.address),
+            issuer.email,
+            issuer.phone,
+            issuer.bank_name,
+            issuer.bank_iban,
+            issuer.bank_bic,
+            issuer.default_template,
+            issuer.currency,
+            issuer.symbol,
+            issuer.number_format,
+            issuer.slug,
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("issuer '{}'", issuer.slug)));
+    }
+    Ok(())
+}
+
+// ─── Clients ─────────────────────────────────────────────────────────────
+
+pub fn client_create(conn: &Connection, client: &Client) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO clients (slug, name, attn, country, tax_id, address, email, notes,
+                              default_issuer_slug, default_template)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            client.slug,
+            client.name,
+            client.attn,
+            client.country,
+            client.tax_id,
+            addr_to_text(&client.address),
+            client.email,
+            client.notes,
+            client.default_issuer_slug,
+            client.default_template,
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn client_list(conn: &Connection) -> Result<Vec<Client>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, slug, name, attn, country, tax_id, address, email, notes,
+                default_issuer_slug, default_template
+         FROM clients ORDER BY slug",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Client {
+                id: row.get(0)?,
+                slug: row.get(1)?,
+                name: row.get(2)?,
+                attn: row.get(3)?,
+                country: row.get(4)?,
+                tax_id: row.get(5)?,
+                address: text_to_addr(&row.get::<_, String>(6)?),
+                email: row.get(7)?,
+                notes: row.get(8)?,
+                default_issuer_slug: row.get(9)?,
+                default_template: row.get(10)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn client_by_slug(conn: &Connection, slug: &str) -> Result<Client> {
+    for c in client_list(conn)? {
+        if c.slug == slug {
+            return Ok(c);
+        }
+    }
+    // Try fuzzy match
+    let matches: Vec<Client> = client_list(conn)?
+        .into_iter()
+        .filter(|c| c.slug.contains(slug) || c.name.to_lowercase().contains(&slug.to_lowercase()))
+        .collect();
+    match matches.len() {
+        0 => Err(AppError::NotFound(format!("client '{slug}'"))),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => Err(AppError::Ambiguous(format!(
+            "client '{slug}' matches {}",
+            matches
+                .iter()
+                .map(|m| m.slug.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ))),
+    }
+}
+
+pub fn client_delete(conn: &Connection, slug: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM clients WHERE slug = ?1", params![slug])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("client '{slug}'")));
+    }
+    Ok(())
+}
+
+/// Full-replace UPDATE. Matches by slug.
+pub fn client_update(conn: &Connection, client: &Client) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE clients SET
+             name = ?1, attn = ?2, country = ?3, tax_id = ?4, address = ?5,
+             email = ?6, notes = ?7, default_issuer_slug = ?8, default_template = ?9
+         WHERE slug = ?10",
+        params![
+            client.name,
+            client.attn,
+            client.country,
+            client.tax_id,
+            addr_to_text(&client.address),
+            client.email,
+            client.notes,
+            client.default_issuer_slug,
+            client.default_template,
+            client.slug,
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("client '{}'", client.slug)));
+    }
+    Ok(())
+}
+
+// ─── Products ────────────────────────────────────────────────────────────
+
+pub fn product_create(conn: &Connection, p: &Product) -> Result<i64> {
+    conn.execute(
+        "INSERT INTO products (slug, description, subtitle, unit, unit_price_minor, currency, tax_rate)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            p.slug,
+            p.description,
+            p.subtitle,
+            p.unit,
+            p.unit_price.0,
+            p.currency,
+            p.tax_rate.to_string(),
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+pub fn product_list(conn: &Connection) -> Result<Vec<Product>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, slug, description, subtitle, unit, unit_price_minor, currency, tax_rate
+         FROM products ORDER BY slug",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Product {
+                id: row.get(0)?,
+                slug: row.get(1)?,
+                description: row.get(2)?,
+                subtitle: row.get(3)?,
+                unit: row.get(4)?,
+                unit_price: MinorUnits(row.get::<_, i64>(5)?),
+                currency: row.get(6)?,
+                tax_rate: Decimal::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn product_by_slug(conn: &Connection, slug: &str) -> Result<Product> {
+    for p in product_list(conn)? {
+        if p.slug == slug {
+            return Ok(p);
+        }
+    }
+    let matches: Vec<Product> = product_list(conn)?
+        .into_iter()
+        .filter(|p| p.slug.contains(slug))
+        .collect();
+    match matches.len() {
+        0 => Err(AppError::NotFound(format!("product '{slug}'"))),
+        1 => Ok(matches.into_iter().next().unwrap()),
+        _ => Err(AppError::Ambiguous(format!(
+            "product '{slug}' matches {}",
+            matches.iter().map(|m| m.slug.as_str()).collect::<Vec<_>>().join(", ")
+        ))),
+    }
+}
+
+pub fn product_delete(conn: &Connection, slug: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM products WHERE slug = ?1", params![slug])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("product '{slug}'")));
+    }
+    Ok(())
+}
+
+/// Full-replace UPDATE. Matches by slug.
+pub fn product_update(conn: &Connection, product: &Product) -> Result<()> {
+    let affected = conn.execute(
+        "UPDATE products SET
+             description = ?1, subtitle = ?2, unit = ?3, unit_price_minor = ?4,
+             currency = ?5, tax_rate = ?6
+         WHERE slug = ?7",
+        params![
+            product.description,
+            product.subtitle,
+            product.unit,
+            product.unit_price.0,
+            product.currency,
+            product.tax_rate.to_string(),
+            product.slug,
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("product '{}'", product.slug)));
+    }
+    Ok(())
+}
+
+// ─── Invoices ────────────────────────────────────────────────────────────
+
+pub fn next_invoice_number(conn: &Connection, issuer: &Issuer, year: i32) -> Result<String> {
+    let seq: i64 = conn
+        .query_row(
+            "SELECT next_seq FROM number_series WHERE issuer_id = ?1 AND year = ?2",
+            params![issuer.id, year],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(1);
+
+    // Bump
+    conn.execute(
+        "INSERT INTO number_series (issuer_id, year, next_seq) VALUES (?1, ?2, ?3)
+         ON CONFLICT(issuer_id, year) DO UPDATE SET next_seq = next_seq + 1",
+        params![issuer.id, year, seq + 1],
+    )?;
+
+    // Format: simple replacement in issuer.number_format
+    let mut out = issuer.number_format.clone();
+    out = out.replace("{year}", &year.to_string());
+    // Accept {seq} or {seq:04}, {seq:05}, etc.
+    if out.contains("{seq:04}") {
+        out = out.replace("{seq:04}", &format!("{:04}", seq));
+    } else if out.contains("{seq:05}") {
+        out = out.replace("{seq:05}", &format!("{:05}", seq));
+    } else {
+        out = out.replace("{seq}", &seq.to_string());
+    }
+    Ok(out)
+}
+
+pub fn invoice_create(conn: &mut Connection, inv: &Invoice) -> Result<i64> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO invoices (number, issuer_id, client_id, issue_date, due_date,
+                               terms, currency, symbol, tax_label, status, notes,
+                               reverse_charge, pay_link, issued_at, paid_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        params![
+            inv.number,
+            inv.issuer_id,
+            inv.client_id,
+            inv.issue_date,
+            inv.due_date,
+            inv.terms,
+            inv.currency,
+            inv.symbol,
+            inv.tax_label,
+            inv.status,
+            inv.notes,
+            inv.reverse_charge as i32,
+            inv.pay_link,
+            inv.issued_at,
+            inv.paid_at,
+        ],
+    )?;
+    let id = tx.last_insert_rowid();
+    for (pos, item) in inv.items.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO invoice_items (invoice_id, position, description, subtitle,
+                                        qty, unit, unit_price_minor, tax_rate, product_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                pos as i64,
+                item.description,
+                item.subtitle,
+                item.qty.to_string(),
+                item.unit,
+                item.unit_price.0,
+                item.tax_rate.to_string(),
+                item.product_id,
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(id)
+}
+
+pub fn invoice_get(conn: &Connection, number: &str) -> Result<Invoice> {
+    let mut inv: Invoice = conn.query_row(
+        "SELECT id, number, issuer_id, client_id, issue_date, due_date, terms,
+                currency, symbol, tax_label, status, notes, reverse_charge, pay_link,
+                issued_at, paid_at
+         FROM invoices WHERE number = ?1",
+        params![number],
+        |row| {
+            Ok(Invoice {
+                id: row.get(0)?,
+                number: row.get(1)?,
+                issuer_id: row.get(2)?,
+                client_id: row.get(3)?,
+                issue_date: row.get(4)?,
+                due_date: row.get(5)?,
+                terms: row.get(6)?,
+                currency: row.get(7)?,
+                symbol: row.get(8)?,
+                tax_label: row.get(9)?,
+                status: row.get(10)?,
+                notes: row.get(11)?,
+                reverse_charge: row.get::<_, i32>(12)? != 0,
+                pay_link: row.get(13)?,
+                issued_at: row.get(14)?,
+                paid_at: row.get(15)?,
+                total_minor: None,
+                items: vec![],
+            })
+        },
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, invoice_id, position, description, subtitle, qty, unit,
+                unit_price_minor, tax_rate, product_id
+         FROM invoice_items WHERE invoice_id = ?1 ORDER BY position",
+    )?;
+    let items = stmt
+        .query_map(params![inv.id], |row| {
+            Ok(InvoiceItem {
+                id: row.get(0)?,
+                invoice_id: row.get(1)?,
+                position: row.get(2)?,
+                description: row.get(3)?,
+                subtitle: row.get(4)?,
+                qty: Decimal::from_str(&row.get::<_, String>(5)?).unwrap_or_default(),
+                unit: row.get(6)?,
+                unit_price: MinorUnits(row.get::<_, i64>(7)?),
+                tax_rate: Decimal::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
+                product_id: row.get(9)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    inv.items = items;
+    Ok(inv)
+}
+
+pub fn invoice_list(
+    conn: &Connection,
+    status: Option<&str>,
+    issuer_slug: Option<&str>,
+) -> Result<Vec<Invoice>> {
+    let mut query = String::from(
+        "SELECT i.id, i.number, i.issuer_id, i.client_id, i.issue_date, i.due_date,
+                i.terms, i.currency, i.symbol, i.tax_label, i.status, i.notes,
+                i.reverse_charge, i.pay_link, i.issued_at, i.paid_at
+         FROM invoices i JOIN issuers s ON s.id = i.issuer_id WHERE 1=1",
+    );
+    let mut p: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(st) = status {
+        query.push_str(" AND i.status = ?");
+        p.push(Box::new(st.to_string()));
+    }
+    if let Some(sl) = issuer_slug {
+        query.push_str(" AND s.slug = ?");
+        p.push(Box::new(sl.to_string()));
+    }
+    query.push_str(" ORDER BY i.issue_date DESC");
+    let mut stmt = conn.prepare(&query)?;
+    let mut rows: Vec<Invoice> = stmt
+        .query_map(
+            rusqlite::params_from_iter(p.iter().map(|b| b.as_ref())),
+            |row| {
+                Ok(Invoice {
+                    id: row.get(0)?,
+                    number: row.get(1)?,
+                    issuer_id: row.get(2)?,
+                    client_id: row.get(3)?,
+                    issue_date: row.get(4)?,
+                    due_date: row.get(5)?,
+                    terms: row.get(6)?,
+                    currency: row.get(7)?,
+                    symbol: row.get(8)?,
+                    tax_label: row.get(9)?,
+                    status: row.get(10)?,
+                    notes: row.get(11)?,
+                    reverse_charge: row.get::<_, i32>(12)? != 0,
+                    pay_link: row.get(13)?,
+                    issued_at: row.get(14)?,
+                    paid_at: row.get(15)?,
+                    total_minor: None,
+                    items: vec![],
+                })
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    // Populate `total_minor` per invoice. Precise math — fetch items in one
+    // grouped query, compute with rust_decimal to avoid float drift.
+    if !rows.is_empty() {
+        use crate::money::{line_total, tax_amount};
+        let mut items_stmt = conn.prepare(
+            "SELECT invoice_id, qty, unit_price_minor, tax_rate
+             FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices)",
+        )?;
+        let mut totals: std::collections::HashMap<i64, i64> =
+            std::collections::HashMap::new();
+        let item_rows = items_stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for r in item_rows {
+            let (iid, qty_s, up_minor, rate_s) = r?;
+            let qty = Decimal::from_str(&qty_s).unwrap_or_default();
+            let rate = Decimal::from_str(&rate_s).unwrap_or_default();
+            let line = line_total(qty, crate::money::MinorUnits(up_minor));
+            let tax = tax_amount(line, rate);
+            *totals.entry(iid).or_insert(0) += line.0 + tax.0;
+        }
+        for inv in rows.iter_mut() {
+            inv.total_minor = totals.get(&inv.id).copied();
+        }
+    }
+    Ok(rows)
+}
+
+/// Update status and, on first transition into `issued` / `paid`, stamp the
+/// corresponding timestamp column. Idempotent — re-marking doesn't overwrite
+/// the original timestamp.
+pub fn invoice_set_status(conn: &Connection, number: &str, status: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let affected = match status {
+        "issued" => conn.execute(
+            "UPDATE invoices
+                SET status = ?1,
+                    issued_at = COALESCE(issued_at, ?2)
+              WHERE number = ?3",
+            params![status, now, number],
+        )?,
+        "paid" => conn.execute(
+            "UPDATE invoices
+                SET status = ?1,
+                    paid_at = COALESCE(paid_at, ?2)
+              WHERE number = ?3",
+            params![status, now, number],
+        )?,
+        _ => conn.execute(
+            "UPDATE invoices SET status = ?1 WHERE number = ?2",
+            params![status, number],
+        )?,
+    };
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("invoice '{number}'")));
+    }
+    Ok(())
+}
+
+pub fn invoice_delete(conn: &Connection, number: &str) -> Result<()> {
+    let affected = conn.execute("DELETE FROM invoices WHERE number = ?1", params![number])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("invoice '{number}'")));
+    }
+    Ok(())
+}

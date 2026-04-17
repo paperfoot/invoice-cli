@@ -1,0 +1,78 @@
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum AppError {
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
+    #[error("Config error: {0}")]
+    Config(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Ambiguous: {0}")]
+    Ambiguous(String),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Database error: {0}")]
+    Db(#[from] rusqlite::Error),
+
+    #[error("Migration error: {0}")]
+    Migration(#[from] refinery::Error),
+
+    #[error("Serde error: {0}")]
+    Serde(#[from] serde_json::Error),
+
+    #[error("Typst render error: {0}")]
+    Render(String),
+
+    #[error("Other: {0}")]
+    Other(String),
+}
+
+impl AppError {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::InvalidInput(_) | Self::Ambiguous(_) => 3,
+            Self::Config(_) => 2,
+            Self::NotFound(_) => 3,
+            Self::Io(_) | Self::Render(_) | Self::Other(_) => 1,
+            Self::Db(_) | Self::Migration(_) | Self::Serde(_) => 1,
+        }
+    }
+
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            Self::InvalidInput(_) => "invalid_input",
+            Self::Ambiguous(_) => "ambiguous",
+            Self::Config(_) => "config_error",
+            Self::NotFound(_) => "not_found",
+            Self::Io(_) => "io_error",
+            Self::Db(_) => "db_error",
+            Self::Migration(_) => "migration_error",
+            Self::Serde(_) => "serde_error",
+            Self::Render(_) => "render_error",
+            Self::Other(_) => "other",
+        }
+    }
+
+    pub fn suggestion(&self) -> &'static str {
+        match self {
+            Self::InvalidInput(_) => "Check arguments with: invoice --help",
+            Self::Ambiguous(_) => "Use the full id or a more specific slug",
+            Self::Config(_) => "Check config with: invoice config show",
+            Self::NotFound(_) => "List available entities with: invoice <kind> list",
+            Self::Io(_) => "Retry the command",
+            Self::Db(_) => "Check database integrity: invoice doctor",
+            Self::Migration(_) => "Database migration failed — check doctor",
+            Self::Serde(_) => "Malformed data — check input",
+            Self::Render(_) => "Typst render failed — run: invoice doctor",
+            Self::Other(_) => "",
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, AppError>;
