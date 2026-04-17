@@ -60,7 +60,7 @@ jobs:
           echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             ${{ steps.package.outputs.pkg }}.tar.gz
