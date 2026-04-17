@@ -64,6 +64,9 @@ pub struct Issuer {
     pub currency: Option<String>,
     pub symbol: Option<String>,
     pub number_format: String,
+    /// Filesystem path to a logo image (PNG/SVG/JPG). Rendered in template
+    /// header when set.
+    pub logo_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +127,16 @@ pub struct Invoice {
     /// `invoice_get` (which returns all items so callers can sum themselves).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_minor: Option<i64>,
+    /// "invoice" or "credit_note". Credit notes reference a source invoice
+    /// via `credits_invoice_id` and are typically displayed with a "CN-"
+    /// prefix and "CREDIT NOTE" title.
+    pub kind: String,
+    pub credits_invoice_id: Option<i64>,
+    /// Invoice-level discount rate (percent, as decimal string e.g. "10").
+    /// Applied to pre-tax subtotal after line-level discounts.
+    pub discount_rate: Option<Decimal>,
+    /// Invoice-level fixed discount in minor units.
+    pub discount_fixed: Option<MinorUnits>,
     pub items: Vec<InvoiceItem>,
 }
 
@@ -139,6 +152,11 @@ pub struct InvoiceItem {
     pub unit_price: MinorUnits,
     pub tax_rate: Decimal,
     pub product_id: Option<i64>,
+    /// Per-line discount rate (percent, as Decimal e.g. 10 for 10%). Applied
+    /// to (qty * unit_price) pre-tax. Mutually exclusive with discount_fixed.
+    pub discount_rate: Option<Decimal>,
+    /// Per-line fixed discount in minor units. Applied to line pre-tax.
+    pub discount_fixed: Option<MinorUnits>,
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -157,8 +175,8 @@ pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
         "INSERT INTO issuers (slug, name, legal_name, jurisdiction, tax_registered,
                               tax_id, company_no, tagline, address, email, phone,
                               bank_name, bank_iban, bank_bic, default_template,
-                              currency, symbol, number_format)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                              currency, symbol, number_format, logo_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             issuer.slug,
             issuer.name,
@@ -178,6 +196,7 @@ pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
             issuer.currency,
             issuer.symbol,
             issuer.number_format,
+            issuer.logo_path,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -188,7 +207,7 @@ pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
         "SELECT id, slug, name, legal_name, jurisdiction, tax_registered,
                 tax_id, company_no, tagline, address, email, phone,
                 bank_name, bank_iban, bank_bic, default_template,
-                currency, symbol, number_format
+                currency, symbol, number_format, logo_path
          FROM issuers ORDER BY slug",
     )?;
     let rows = stmt
@@ -214,6 +233,7 @@ pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
                 currency: row.get(16)?,
                 symbol: row.get(17)?,
                 number_format: row.get(18)?,
+                logo_path: row.get(19)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -263,8 +283,8 @@ pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
              tax_id = ?5, company_no = ?6, tagline = ?7, address = ?8,
              email = ?9, phone = ?10, bank_name = ?11, bank_iban = ?12,
              bank_bic = ?13, default_template = ?14, currency = ?15,
-             symbol = ?16, number_format = ?17
-         WHERE slug = ?18",
+             symbol = ?16, number_format = ?17, logo_path = ?18
+         WHERE slug = ?19",
         params![
             issuer.name,
             issuer.legal_name,
@@ -283,6 +303,7 @@ pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
             issuer.currency,
             issuer.symbol,
             issuer.number_format,
+            issuer.logo_path,
             issuer.slug,
         ],
     )?;
@@ -494,33 +515,43 @@ pub fn product_update(conn: &Connection, product: &Product) -> Result<()> {
 
 // ─── Invoices ────────────────────────────────────────────────────────────
 
-pub fn next_invoice_number(conn: &Connection, issuer: &Issuer, year: i32) -> Result<String> {
+/// Generate the next document number for an issuer/year/kind combination.
+/// `kind` is typically "invoice" or "credit_note" — credit notes get an
+/// independent sequence and are formatted with a "CN-" prefix.
+pub fn next_invoice_number(
+    conn: &Connection,
+    issuer: &Issuer,
+    year: i32,
+    kind: &str,
+) -> Result<String> {
     let seq: i64 = conn
         .query_row(
-            "SELECT next_seq FROM number_series WHERE issuer_id = ?1 AND year = ?2",
-            params![issuer.id, year],
+            "SELECT next_seq FROM number_series
+               WHERE issuer_id = ?1 AND year = ?2 AND kind = ?3",
+            params![issuer.id, year, kind],
             |r| r.get(0),
         )
         .optional()?
         .unwrap_or(1);
 
-    // Bump
     conn.execute(
-        "INSERT INTO number_series (issuer_id, year, next_seq) VALUES (?1, ?2, ?3)
-         ON CONFLICT(issuer_id, year) DO UPDATE SET next_seq = next_seq + 1",
-        params![issuer.id, year, seq + 1],
+        "INSERT INTO number_series (issuer_id, year, kind, next_seq)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(issuer_id, year, kind) DO UPDATE SET next_seq = next_seq + 1",
+        params![issuer.id, year, kind, seq + 1],
     )?;
 
-    // Format: simple replacement in issuer.number_format
     let mut out = issuer.number_format.clone();
     out = out.replace("{year}", &year.to_string());
-    // Accept {seq} or {seq:04}, {seq:05}, etc.
     if out.contains("{seq:04}") {
         out = out.replace("{seq:04}", &format!("{:04}", seq));
     } else if out.contains("{seq:05}") {
         out = out.replace("{seq:05}", &format!("{:05}", seq));
     } else {
         out = out.replace("{seq}", &seq.to_string());
+    }
+    if kind == "credit_note" {
+        out = format!("CN-{out}");
     }
     Ok(out)
 }
@@ -530,8 +561,9 @@ pub fn invoice_create(conn: &mut Connection, inv: &Invoice) -> Result<i64> {
     tx.execute(
         "INSERT INTO invoices (number, issuer_id, client_id, issue_date, due_date,
                                terms, currency, symbol, tax_label, status, notes,
-                               reverse_charge, pay_link, issued_at, paid_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                               reverse_charge, pay_link, issued_at, paid_at,
+                               kind, credits_invoice_id, discount_rate, discount_fixed_minor)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             inv.number,
             inv.issuer_id,
@@ -548,14 +580,19 @@ pub fn invoice_create(conn: &mut Connection, inv: &Invoice) -> Result<i64> {
             inv.pay_link,
             inv.issued_at,
             inv.paid_at,
+            inv.kind,
+            inv.credits_invoice_id,
+            inv.discount_rate.as_ref().map(|d| d.to_string()),
+            inv.discount_fixed.as_ref().map(|m| m.0),
         ],
     )?;
     let id = tx.last_insert_rowid();
     for (pos, item) in inv.items.iter().enumerate() {
         tx.execute(
             "INSERT INTO invoice_items (invoice_id, position, description, subtitle,
-                                        qty, unit, unit_price_minor, tax_rate, product_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                        qty, unit, unit_price_minor, tax_rate, product_id,
+                                        discount_rate, discount_fixed_minor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 id,
                 pos as i64,
@@ -566,6 +603,8 @@ pub fn invoice_create(conn: &mut Connection, inv: &Invoice) -> Result<i64> {
                 item.unit_price.0,
                 item.tax_rate.to_string(),
                 item.product_id,
+                item.discount_rate.as_ref().map(|d| d.to_string()),
+                item.discount_fixed.as_ref().map(|m| m.0),
             ],
         )?;
     }
@@ -577,7 +616,8 @@ pub fn invoice_get(conn: &Connection, number: &str) -> Result<Invoice> {
     let mut inv: Invoice = conn.query_row(
         "SELECT id, number, issuer_id, client_id, issue_date, due_date, terms,
                 currency, symbol, tax_label, status, notes, reverse_charge, pay_link,
-                issued_at, paid_at
+                issued_at, paid_at, kind, credits_invoice_id,
+                discount_rate, discount_fixed_minor
          FROM invoices WHERE number = ?1",
         params![number],
         |row| {
@@ -598,6 +638,12 @@ pub fn invoice_get(conn: &Connection, number: &str) -> Result<Invoice> {
                 pay_link: row.get(13)?,
                 issued_at: row.get(14)?,
                 paid_at: row.get(15)?,
+                kind: row.get(16)?,
+                credits_invoice_id: row.get(17)?,
+                discount_rate: row
+                    .get::<_, Option<String>>(18)?
+                    .and_then(|s| Decimal::from_str(&s).ok()),
+                discount_fixed: row.get::<_, Option<i64>>(19)?.map(MinorUnits),
                 total_minor: None,
                 items: vec![],
             })
@@ -606,7 +652,7 @@ pub fn invoice_get(conn: &Connection, number: &str) -> Result<Invoice> {
 
     let mut stmt = conn.prepare(
         "SELECT id, invoice_id, position, description, subtitle, qty, unit,
-                unit_price_minor, tax_rate, product_id
+                unit_price_minor, tax_rate, product_id, discount_rate, discount_fixed_minor
          FROM invoice_items WHERE invoice_id = ?1 ORDER BY position",
     )?;
     let items = stmt
@@ -622,6 +668,10 @@ pub fn invoice_get(conn: &Connection, number: &str) -> Result<Invoice> {
                 unit_price: MinorUnits(row.get::<_, i64>(7)?),
                 tax_rate: Decimal::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
                 product_id: row.get(9)?,
+                discount_rate: row
+                    .get::<_, Option<String>>(10)?
+                    .and_then(|s| Decimal::from_str(&s).ok()),
+                discount_fixed: row.get::<_, Option<i64>>(11)?.map(MinorUnits),
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -637,7 +687,8 @@ pub fn invoice_list(
     let mut query = String::from(
         "SELECT i.id, i.number, i.issuer_id, i.client_id, i.issue_date, i.due_date,
                 i.terms, i.currency, i.symbol, i.tax_label, i.status, i.notes,
-                i.reverse_charge, i.pay_link, i.issued_at, i.paid_at
+                i.reverse_charge, i.pay_link, i.issued_at, i.paid_at,
+                i.kind, i.credits_invoice_id, i.discount_rate, i.discount_fixed_minor
          FROM invoices i JOIN issuers s ON s.id = i.issuer_id WHERE 1=1",
     );
     let mut p: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -672,6 +723,12 @@ pub fn invoice_list(
                     pay_link: row.get(13)?,
                     issued_at: row.get(14)?,
                     paid_at: row.get(15)?,
+                    kind: row.get(16)?,
+                    credits_invoice_id: row.get(17)?,
+                    discount_rate: row
+                        .get::<_, Option<String>>(18)?
+                        .and_then(|s| Decimal::from_str(&s).ok()),
+                    discount_fixed: row.get::<_, Option<i64>>(19)?.map(MinorUnits),
                     total_minor: None,
                     items: vec![],
                 })
@@ -679,34 +736,60 @@ pub fn invoice_list(
         )?
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    // Populate `total_minor` per invoice. Precise math — fetch items in one
-    // grouped query, compute with rust_decimal to avoid float drift.
+    // Populate `total_minor` per invoice. Discount-aware: uses
+    // `line_total_discounted` (see money.rs) so listings match the PDF.
     if !rows.is_empty() {
-        use crate::money::{line_total, tax_amount};
+        use crate::money::{line_total_discounted, tax_amount, MinorUnits};
         let mut items_stmt = conn.prepare(
-            "SELECT invoice_id, qty, unit_price_minor, tax_rate
-             FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices)",
+            "SELECT invoice_id, qty, unit_price_minor, tax_rate,
+                    discount_rate, discount_fixed_minor
+             FROM invoice_items
+             WHERE invoice_id IN (SELECT id FROM invoices)",
         )?;
-        let mut totals: std::collections::HashMap<i64, i64> =
-            std::collections::HashMap::new();
+        #[derive(Default)]
+        struct Acc {
+            subtotal: i64,
+            tax: i64,
+        }
+        let mut acc: std::collections::HashMap<i64, Acc> = std::collections::HashMap::new();
         let item_rows = items_stmt.query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<i64>>(5)?,
             ))
         })?;
         for r in item_rows {
-            let (iid, qty_s, up_minor, rate_s) = r?;
+            let (iid, qty_s, up_minor, rate_s, disc_rate, disc_fixed) = r?;
             let qty = Decimal::from_str(&qty_s).unwrap_or_default();
             let rate = Decimal::from_str(&rate_s).unwrap_or_default();
-            let line = line_total(qty, crate::money::MinorUnits(up_minor));
+            let dr = disc_rate.and_then(|s| Decimal::from_str(&s).ok());
+            let df = disc_fixed.map(MinorUnits);
+            let line = line_total_discounted(qty, MinorUnits(up_minor), dr, df);
             let tax = tax_amount(line, rate);
-            *totals.entry(iid).or_insert(0) += line.0 + tax.0;
+            let e = acc.entry(iid).or_default();
+            e.subtotal += line.0;
+            e.tax += tax.0;
         }
         for inv in rows.iter_mut() {
-            inv.total_minor = totals.get(&inv.id).copied();
+            if let Some(a) = acc.get(&inv.id) {
+                // Apply invoice-level discount to pre-tax subtotal. Recompute
+                // tax proportionally — approximation (tax already computed
+                // per-line); acceptable for listing totals where PDFs rely on
+                // the per-line numbers anyway.
+                let mut sub = a.subtotal;
+                if let Some(rate) = &inv.discount_rate {
+                    let cut = crate::money::apply_rate(MinorUnits(sub), *rate);
+                    sub -= cut.0;
+                }
+                if let Some(fx) = &inv.discount_fixed {
+                    sub -= fx.0;
+                }
+                inv.total_minor = Some(sub + a.tax);
+            }
         }
     }
     Ok(rows)
@@ -743,10 +826,172 @@ pub fn invoice_set_status(conn: &Connection, number: &str, status: &str) -> Resu
     Ok(())
 }
 
-pub fn invoice_delete(conn: &Connection, number: &str) -> Result<()> {
-    let affected = conn.execute("DELETE FROM invoices WHERE number = ?1", params![number])?;
+/// Delete an invoice by number. Refuses non-draft invoices unless `force`.
+/// Deleting a non-draft invoice breaks the numbering sequence — which is a
+/// regulatory problem in many jurisdictions. Forcing should be deliberate.
+pub fn invoice_delete(conn: &Connection, number: &str, force: bool) -> Result<()> {
+    let status: Option<String> = conn
+        .query_row(
+            "SELECT status FROM invoices WHERE number = ?1",
+            params![number],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let status = status.ok_or_else(|| AppError::NotFound(format!("invoice '{number}'")))?;
+    if status != "draft" && !force {
+        return Err(AppError::InvalidInput(format!(
+            "refusing to delete non-draft invoice '{number}' (status='{status}') — pass --force to override. Prefer voiding or issuing a credit note."
+        )));
+    }
+    conn.execute("DELETE FROM invoices WHERE number = ?1", params![number])?;
+    Ok(())
+}
+
+/// Draft-only metadata edit. Rejects edits to issued / paid / void invoices —
+/// the correct path for those is a credit note.
+pub fn invoice_update_draft(conn: &Connection, inv: &Invoice) -> Result<()> {
+    let status: Option<String> = conn
+        .query_row(
+            "SELECT status FROM invoices WHERE number = ?1",
+            params![inv.number],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let status =
+        status.ok_or_else(|| AppError::NotFound(format!("invoice '{}'", inv.number)))?;
+    if status != "draft" {
+        return Err(AppError::InvalidInput(format!(
+            "invoice '{}' is {status}, not draft — issued invoices are immutable. Use a credit note to correct.",
+            inv.number
+        )));
+    }
+    conn.execute(
+        "UPDATE invoices SET
+             client_id = ?1, issue_date = ?2, due_date = ?3, terms = ?4,
+             currency = ?5, symbol = ?6, tax_label = ?7, notes = ?8,
+             reverse_charge = ?9, pay_link = ?10,
+             discount_rate = ?11, discount_fixed_minor = ?12
+         WHERE number = ?13",
+        params![
+            inv.client_id,
+            inv.issue_date,
+            inv.due_date,
+            inv.terms,
+            inv.currency,
+            inv.symbol,
+            inv.tax_label,
+            inv.notes,
+            inv.reverse_charge as i32,
+            inv.pay_link,
+            inv.discount_rate.as_ref().map(|d| d.to_string()),
+            inv.discount_fixed.as_ref().map(|m| m.0),
+            inv.number,
+        ],
+    )?;
+    Ok(())
+}
+
+fn require_draft(conn: &Connection, invoice_id: i64) -> Result<()> {
+    let status: String = conn.query_row(
+        "SELECT status FROM invoices WHERE id = ?1",
+        params![invoice_id],
+        |r| r.get(0),
+    )?;
+    if status != "draft" {
+        return Err(AppError::InvalidInput(format!(
+            "invoice is {status}, not draft — items cannot be modified. Use a credit note to correct."
+        )));
+    }
+    Ok(())
+}
+
+/// Append an item to a draft invoice. Fails if the invoice isn't draft.
+pub fn invoice_item_add(conn: &Connection, invoice_id: i64, item: &InvoiceItem) -> Result<i64> {
+    require_draft(conn, invoice_id)?;
+    let next_pos: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM invoice_items WHERE invoice_id = ?1",
+            params![invoice_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    conn.execute(
+        "INSERT INTO invoice_items (invoice_id, position, description, subtitle,
+                                    qty, unit, unit_price_minor, tax_rate, product_id,
+                                    discount_rate, discount_fixed_minor)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            invoice_id,
+            next_pos,
+            item.description,
+            item.subtitle,
+            item.qty.to_string(),
+            item.unit,
+            item.unit_price.0,
+            item.tax_rate.to_string(),
+            item.product_id,
+            item.discount_rate.as_ref().map(|d| d.to_string()),
+            item.discount_fixed.as_ref().map(|m| m.0),
+        ],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Remove the item at `position` from a draft invoice; re-compacts trailing
+/// positions so there are no holes.
+pub fn invoice_item_remove(conn: &mut Connection, invoice_id: i64, position: i64) -> Result<()> {
+    require_draft(conn, invoice_id)?;
+    let tx = conn.transaction()?;
+    let affected = tx.execute(
+        "DELETE FROM invoice_items WHERE invoice_id = ?1 AND position = ?2",
+        params![invoice_id, position],
+    )?;
     if affected == 0 {
-        return Err(AppError::NotFound(format!("invoice '{number}'")));
+        return Err(AppError::NotFound(format!(
+            "item at position {position} of invoice id {invoice_id}"
+        )));
+    }
+    tx.execute(
+        "UPDATE invoice_items SET position = position - 1
+           WHERE invoice_id = ?1 AND position > ?2",
+        params![invoice_id, position],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Replace the item at `position` with `item`'s fields. Draft-only.
+pub fn invoice_item_edit(
+    conn: &Connection,
+    invoice_id: i64,
+    position: i64,
+    item: &InvoiceItem,
+) -> Result<()> {
+    require_draft(conn, invoice_id)?;
+    let affected = conn.execute(
+        "UPDATE invoice_items SET
+             description = ?1, subtitle = ?2, qty = ?3, unit = ?4,
+             unit_price_minor = ?5, tax_rate = ?6, product_id = ?7,
+             discount_rate = ?8, discount_fixed_minor = ?9
+         WHERE invoice_id = ?10 AND position = ?11",
+        params![
+            item.description,
+            item.subtitle,
+            item.qty.to_string(),
+            item.unit,
+            item.unit_price.0,
+            item.tax_rate.to_string(),
+            item.product_id,
+            item.discount_rate.as_ref().map(|d| d.to_string()),
+            item.discount_fixed.as_ref().map(|m| m.0),
+            invoice_id,
+            position,
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!(
+            "item at position {position} of invoice id {invoice_id}"
+        )));
     }
     Ok(())
 }

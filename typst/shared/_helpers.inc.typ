@@ -29,7 +29,9 @@
   let subtotal = 0.0
   let by-rate = (:)
   for item in items {
-    let line = item.qty * item.unit-price
+    // Prefer the pre-computed `amount` (post-discount, from Rust) when
+    // present; else fall back to qty × unit-price for legacy data.
+    let line = if "amount" in item and item.amount != none { item.amount } else { item.qty * item.unit-price }
     subtotal += line
     let k = str(item.tax-rate)
     if k in by-rate {
@@ -51,7 +53,20 @@
     tax-lines: tax-lines,
     tax-total: tax-total,
     total: subtotal + tax-total,
+    discount: none,
+    discount-label: none,
   )
+}
+
+// Use Rust-precomputed totals (precision + discount-aware) when available;
+// otherwise compute from items. Templates call this rather than compute-totals
+// directly so they always see consistent numbers.
+#let resolve-totals(d) = {
+  if "totals-override" in d and d.totals-override != none {
+    d.totals-override
+  } else {
+    compute-totals(d.items)
+  }
 }
 
 #let star-mark(size: 14pt, color: black) = {

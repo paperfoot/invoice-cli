@@ -90,6 +90,9 @@ pub enum IssuerCmd {
         bank_bic: Option<String>,
         #[arg(long, default_value = "vienna")]
         template: String,
+        /// Path to a logo image (PNG/SVG/JPG). Rendered in template header.
+        #[arg(long)]
+        logo: Option<String>,
     },
     /// Edit an existing issuer — pass only the fields you want to change
     Edit {
@@ -128,6 +131,8 @@ pub enum IssuerCmd {
         symbol: Option<String>,
         #[arg(long)]
         number_format: Option<String>,
+        #[arg(long)]
+        logo: Option<String>,
     },
     /// Shorthand: change the issuer's default template
     SetTemplate {
@@ -283,6 +288,77 @@ pub enum InvoiceCmd {
         /// Payment URL (Stripe Payment Link, EPC-QR, any URL) encoded as QR
         #[arg(long)]
         pay_link: Option<String>,
+        /// Invoice-level discount rate (percent, e.g. "10" for 10% off subtotal)
+        #[arg(long)]
+        discount_rate: Option<String>,
+        /// Invoice-level fixed discount in major units (e.g. "50.00")
+        #[arg(long)]
+        discount_fixed: Option<String>,
+    },
+    /// Edit an existing DRAFT invoice's metadata (issued/paid/void invoices
+    /// are immutable — use a credit note instead).
+    Edit {
+        number: String,
+        #[arg(long)]
+        client: Option<String>,
+        #[arg(long)]
+        due: Option<String>,
+        #[arg(long)]
+        terms: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        currency: Option<String>,
+        #[arg(long)]
+        pay_link: Option<String>,
+        #[arg(long)]
+        reverse_charge: Option<bool>,
+        #[arg(long)]
+        discount_rate: Option<String>,
+        #[arg(long)]
+        discount_fixed: Option<String>,
+    },
+    /// Manage line items on a DRAFT invoice
+    #[command(subcommand)]
+    Items(InvoiceItemCmd),
+    /// Issue a credit note against an existing invoice
+    CreditNote {
+        /// Source invoice number
+        number: String,
+        /// Copy ALL line items from source with positive qty — represents a
+        /// full reversal. Mutually exclusive with --item.
+        #[arg(long, conflicts_with = "items")]
+        full: bool,
+        /// Explicit items to include on the credit note (same format as
+        /// `invoices new --item`). Amounts should reflect the refund value.
+        #[arg(long = "item")]
+        items: Vec<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        #[arg(long)]
+        pay_link: Option<String>,
+    },
+    /// Ageing report for unpaid invoices, bucketed 0-30 / 31-60 / 61-90 / 90+
+    Aging {
+        #[arg(long = "as")]
+        issuer: Option<String>,
+    },
+    /// Export invoices as CSV / JSON — month-end accountant handoff
+    Export {
+        /// YYYY-MM-DD inclusive lower bound on issue_date
+        #[arg(long)]
+        from: Option<String>,
+        /// YYYY-MM-DD inclusive upper bound on issue_date
+        #[arg(long)]
+        to: Option<String>,
+        /// csv | json (default csv)
+        #[arg(long, default_value = "csv")]
+        format: String,
+        /// Output path. Defaults to stdout.
+        #[arg(long, short)]
+        out: Option<String>,
+        #[arg(long = "as")]
+        issuer: Option<String>,
     },
     /// Clone an existing invoice's line items into a new draft — same client,
     /// new number + dates. Handy for recurring billing.
@@ -304,6 +380,9 @@ pub enum InvoiceCmd {
         status: Option<String>,
         #[arg(long = "as")]
         issuer: Option<String>,
+        /// Only show invoices past due date and not paid/void
+        #[arg(long)]
+        overdue: bool,
     },
     #[command(alias = "get")]
     Show { number: String },
@@ -326,7 +405,53 @@ pub enum InvoiceCmd {
         status: String,
     },
     #[command(alias = "rm")]
-    Delete { number: String },
+    Delete {
+        number: String,
+        /// Allow deleting a non-draft invoice. Breaks number-sequence
+        /// integrity — prefer `mark void` or credit note in most cases.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum InvoiceItemCmd {
+    /// Add a line item to a draft invoice
+    Add {
+        number: String,
+        /// Item spec: "product-slug[:qty]" OR "Description:qty:price[:rate]"
+        spec: String,
+        #[arg(long)]
+        subtitle: Option<String>,
+        #[arg(long)]
+        discount_rate: Option<String>,
+        #[arg(long)]
+        discount_fixed: Option<String>,
+    },
+    /// Remove the item at `position` (zero-indexed) from a draft invoice
+    #[command(alias = "rm")]
+    Remove { number: String, position: i64 },
+    /// Edit the item at `position` — any subset of fields
+    Edit {
+        number: String,
+        position: i64,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        subtitle: Option<String>,
+        #[arg(long)]
+        qty: Option<String>,
+        #[arg(long)]
+        unit: Option<String>,
+        #[arg(long)]
+        price: Option<String>,
+        #[arg(long)]
+        tax_rate: Option<String>,
+        #[arg(long)]
+        discount_rate: Option<String>,
+        #[arg(long)]
+        discount_fixed: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

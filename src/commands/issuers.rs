@@ -22,6 +22,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             bank_iban,
             bank_bic,
             template,
+            logo,
         } => {
             let jur = Jurisdiction::from_str(&jurisdiction).ok_or_else(|| {
                 AppError::InvalidInput(format!(
@@ -49,6 +50,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                 currency: Some(profile.currency.to_string()),
                 symbol: Some(profile.symbol.to_string()),
                 number_format: "{year}-{seq:04}".into(),
+                logo_path: logo,
             };
             let id = db::issuer_create(&conn, &issuer)?;
             let mut out = issuer.clone();
@@ -103,6 +105,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             currency,
             symbol,
             number_format,
+            logo,
         } => {
             let mut issuer = db::issuer_by_slug(&conn, &slug)?;
             if let Some(v) = name {
@@ -160,6 +163,9 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             }
             if let Some(v) = number_format {
                 issuer.number_format = v;
+            }
+            if let Some(v) = logo {
+                issuer.logo_path = Some(v);
             }
             db::issuer_update(&conn, &issuer)?;
             print_success(ctx, &issuer, |i| {

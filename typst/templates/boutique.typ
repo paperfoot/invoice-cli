@@ -2,11 +2,11 @@
 // Template: boutique — Brand-led chromatic (restrained)
 // ═══════════════════════════════════════════════════════════════════════════
 
-#import "../shared/invoice.typ": sample-data, compute-totals, star-mark
+#import "../shared/invoice.typ": sample-data, compute-totals, resolve-totals, star-mark, money
 #import "../shared/components.typ": *
 
 #let d = sample-data
-#let totals = compute-totals(d.items)
+#let totals = resolve-totals(d)
 
 #let accent = rgb("#3D5D4A")
 #let theme = (
@@ -51,6 +51,10 @@
     columns: (1.1fr, 1fr),
     align: (left + horizon, right + horizon),
     [
+      #if "logo" in d.issuer and d.issuer.logo != none [
+        #image(d.issuer.logo, height: 14mm)
+        #v(2mm)
+      ]
       #grid(
         columns: (auto, auto),
         column-gutter: 10pt,
@@ -71,13 +75,16 @@
       )
     ],
     [
-      #align(right, text(size: 8.5pt, tracking: 2pt, weight: 500)[#upper("Invoice")])
+      #align(right, text(size: 8.5pt, tracking: 2pt, weight: 500)[#upper(d.invoice.title)])
       #v(-2pt)
       #align(right, fit-size(
         (22pt, 19pt, 16pt, 13pt),
         80mm,
         s => text(font: serif, size: s, style: "italic", weight: 500, tracking: -0.2pt)[№ #d.invoice.number],
       ))
+      #if d.invoice.kind == "credit-note" and d.invoice.credits-number != none [
+        #align(right, text(size: 8.5pt, style: "italic", tracking: 0.3pt)[re: Invoice № #d.invoice.credits-number])
+      ]
     ],
   )
 ]
@@ -120,6 +127,30 @@
 
 #line-items-table(d.items, theme, currency-symbol: d.invoice.symbol, tax-label: d.invoice.tax-label)
 
+// Line-level discount summary — soft sage, aligned with totals column.
+#let discounted-items = d.items.filter(it => "discount" in it and it.discount != none)
+#if discounted-items.len() > 0 [
+  #v(sp.xs)
+  #align(right)[
+    #box(width: 90mm)[
+      #for it in discounted-items [
+        #grid(
+          columns: (1fr, auto),
+          column-gutter: sp.l,
+          align: (left, right),
+          text(size: 8pt, fill: theme.mute)[
+            #it.description ·
+            #if it.discount-label != none and it.discount-label.starts-with("rate:") {
+              "less " + it.discount-label.slice(5) + "%"
+            } else { "discount" }
+          ],
+          text(size: 8pt, fill: theme.mute)[−#money(it.discount, symbol: d.invoice.symbol)],
+        )
+      ]
+    ]
+  ]
+]
+
 #v(mm-sp.s)
 #grid(
   columns: (1fr, auto),
@@ -130,6 +161,31 @@
   ],
   tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 90mm, tax-label: d.invoice.tax-label),
 )
+
+// Invoice-level discount row — sits under the soft-fill totals card.
+#if "discount" in totals and totals.discount != none [
+  #v(sp.s)
+  #align(right)[
+    #box(width: 90mm)[
+      #grid(
+        columns: (1fr, auto),
+        column-gutter: sp.m,
+        align: (left, right),
+        text(size: 9.5pt, fill: theme.mute)[#if totals.discount-label != none { totals.discount-label } else { "Discount" }],
+        text(size: 9.5pt, fill: theme.accent)[−#money(totals.discount, symbol: d.invoice.symbol)],
+      )
+    ]
+  ]
+]
+
+// Reverse-charge callout — hairline sage box matching boutique palette.
+#if d.invoice.reverse-charge [
+  #v(mm-sp.s)
+  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.hair, [
+    #text(weight: "medium", size: 9pt, fill: theme.accent)[Reverse charge]\
+    #text(size: 8pt, fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
+  ])
+]
 
 #v(mm-sp.m)
 #line(length: 100%, stroke: 0.3pt + theme.hair)

@@ -68,10 +68,38 @@ pub fn line_total(qty: Decimal, unit_price: MinorUnits) -> MinorUnits {
     MinorUnits::from_decimal(qty * up)
 }
 
-/// Compute tax amount in minor units: base * rate / 100.
-pub fn tax_amount(base: MinorUnits, rate: Decimal) -> MinorUnits {
+/// Apply a percent rate to a base. Shared by tax_amount and discount math.
+pub fn apply_rate(base: MinorUnits, rate: Decimal) -> MinorUnits {
     let amt = base.as_decimal() * rate / Decimal::from(100);
     MinorUnits::from_decimal(amt)
+}
+
+/// Compute tax amount in minor units: base * rate / 100.
+pub fn tax_amount(base: MinorUnits, rate: Decimal) -> MinorUnits {
+    apply_rate(base, rate)
+}
+
+/// Line total after applying at most one of (rate discount, fixed discount).
+/// If both are set, `rate` wins — caller should enforce mutual exclusion at
+/// the CLI layer. Result is clamped at zero so a mis-sized fixed discount
+/// can't flip the line negative.
+pub fn line_total_discounted(
+    qty: Decimal,
+    unit_price: MinorUnits,
+    discount_rate: Option<Decimal>,
+    discount_fixed: Option<MinorUnits>,
+) -> MinorUnits {
+    let base = line_total(qty, unit_price);
+    if let Some(rate) = discount_rate {
+        let cut = apply_rate(base, rate);
+        let res = base.0 - cut.0;
+        return MinorUnits(res.max(0));
+    }
+    if let Some(fx) = discount_fixed {
+        let res = base.0 - fx.0;
+        return MinorUnits(res.max(0));
+    }
+    base
 }
 
 #[cfg(test)]
@@ -103,5 +131,36 @@ mod tests {
         // 24,600.00 × 9% = 2214.00
         let tax = tax_amount(MinorUnits::from_major(24600.0), dec!(9.0));
         assert_eq!(tax, MinorUnits::from_major(2214.0));
+    }
+
+    #[test]
+    fn line_discount_rate() {
+        // 10 × 100 = 1000, 10% off → 900
+        let r = line_total_discounted(dec!(10), MinorUnits::from_major(100.0), Some(dec!(10)), None);
+        assert_eq!(r, MinorUnits::from_major(900.0));
+    }
+
+    #[test]
+    fn line_discount_fixed() {
+        // 1 × 500 = 500, fixed 50 off → 450
+        let r = line_total_discounted(
+            dec!(1),
+            MinorUnits::from_major(500.0),
+            None,
+            Some(MinorUnits::from_major(50.0)),
+        );
+        assert_eq!(r, MinorUnits::from_major(450.0));
+    }
+
+    #[test]
+    fn line_discount_clamps_at_zero() {
+        // Over-discount — shouldn't go negative
+        let r = line_total_discounted(
+            dec!(1),
+            MinorUnits::from_major(10.0),
+            None,
+            Some(MinorUnits::from_major(999.0)),
+        );
+        assert_eq!(r, MinorUnits(0));
     }
 }

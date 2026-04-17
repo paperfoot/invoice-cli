@@ -2,11 +2,11 @@
 // Template: monoline — Technical receipt
 // ═══════════════════════════════════════════════════════════════════════════
 
-#import "../shared/invoice.typ": sample-data, compute-totals
+#import "../shared/invoice.typ": sample-data, compute-totals, resolve-totals, money
 #import "../shared/components.typ": *
 
 #let d = sample-data
-#let totals = compute-totals(d.items)
+#let totals = resolve-totals(d)
 
 #let theme = (
   ink: rgb("#0F0F0F"),
@@ -43,6 +43,10 @@
   align: (left + horizon, right + horizon),
   column-gutter: 8mm,
   [
+    #if "logo" in d.issuer and d.issuer.logo != none [
+      #image(d.issuer.logo, height: 10mm)
+      #v(2mm)
+    ]
     #fit-size(
       (12pt, 10.5pt, 9pt),
       100mm,
@@ -54,13 +58,16 @@
     ]
   ],
   [
-    #align(right, text(fill: theme.accent, size: 9pt, tracking: 1pt)[\[ INVOICE \]])
+    #align(right, text(fill: theme.accent, size: 9pt, tracking: 1pt)[\[ #upper(d.invoice.title) \]])
     #v(-3pt)
     #align(right, fit-size(
       (20pt, 17pt, 14pt, 12pt),
       90mm,
       s => text(size: s, weight: 500, tracking: 0.4pt)[\##d.invoice.number],
     ))
+    #if d.invoice.kind == "credit-note" and d.invoice.credits-number != none [
+      #align(right, text(size: 8.5pt, fill: theme.mute)[\# re: \##d.invoice.credits-number])
+    ]
   ],
 )
 
@@ -107,8 +114,58 @@
 
 // ─── ITEMS + TOTALS ──────────────────────────────────────────────────────
 #line-items-table(d.items, theme, currency-symbol: d.invoice.symbol, tax-label: d.invoice.tax-label)
+
+// Line-level discount summary — monospace technical notation.
+#let discounted-items = d.items.filter(it => "discount" in it and it.discount != none)
+#if discounted-items.len() > 0 [
+  #v(sp.xs)
+  #align(right)[
+    #box(width: 82mm)[
+      #for it in discounted-items [
+        #grid(
+          columns: (1fr, auto),
+          column-gutter: sp.m,
+          align: (left, right),
+          text(font: theme.mono-font, size: 8pt, fill: theme.mute)[
+            #it.description :
+            #if it.discount-label != none and it.discount-label.starts-with("rate:") {
+              "-" + it.discount-label.slice(5) + "%"
+            } else { "less" }
+          ],
+          text(font: theme.mono-font, size: 8pt, fill: theme.mute)[-#money(it.discount, symbol: d.invoice.symbol)],
+        )
+      ]
+    ]
+  ]
+]
+
 #v(mm-sp.s)
 #tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 82mm, tax-label: d.invoice.tax-label)
+
+// Invoice-level discount row.
+#if "discount" in totals and totals.discount != none [
+  #v(sp.s)
+  #align(right)[
+    #box(width: 82mm)[
+      #grid(
+        columns: (1fr, auto),
+        column-gutter: sp.m,
+        align: (left, right),
+        text(font: theme.mono-font, size: 9.5pt, fill: theme.mute)[#if totals.discount-label != none { totals.discount-label } else { "Discount" }],
+        text(font: theme.mono-font, size: 9.5pt, fill: theme.accent)[-#money(totals.discount, symbol: d.invoice.symbol)],
+      )
+    ]
+  ]
+]
+
+// Reverse-charge callout — technical hairline box.
+#if d.invoice.reverse-charge [
+  #v(mm-sp.s)
+  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.dim, [
+    #text(font: theme.mono-font, weight: "medium", size: 9pt, fill: theme.ink)[\[ REVERSE CHARGE \]]\
+    #text(font: theme.mono-font, size: 8pt, fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
+  ])
+]
 
 // ─── PAYMENT + NOTES ─────────────────────────────────────────────────────
 #v(mm-sp.m)

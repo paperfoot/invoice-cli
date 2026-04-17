@@ -11,9 +11,9 @@ use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
 
-use crate::db::{Client, Invoice, Issuer};
+use crate::db::{self, Client, Invoice, Issuer};
 use crate::error::{AppError, Result};
-use crate::money::{line_total, tax_amount, MinorUnits};
+use crate::money::{apply_rate, line_total, line_total_discounted, tax_amount, MinorUnits};
 use crate::typst_assets;
 
 #[derive(Debug, Serialize)]
@@ -47,6 +47,8 @@ pub struct IssuerData {
     pub tax_id: Option<String>,
     pub company_no: Option<String>,
     pub bank: Option<BankData>,
+    /// Typst-resolvable logo path (relative to --root). None when no logo.
+    pub logo: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +77,10 @@ pub struct InvoiceMeta {
     pub tax_label: String,
     pub title: String,
     pub reverse_charge: bool,
+    /// "invoice" or "credit-note" (kebab-case for Typst-friendliness)
+    pub kind: String,
+    /// When kind == "credit-note", the source invoice number to reference.
+    pub credits_number: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +92,14 @@ pub struct ItemData {
     pub unit_price: f64,
     pub tax_rate: f64,
     pub amount: f64,
+    /// Pre-discount line value (qty * unit_price) when a discount applies.
+    /// None when there is no discount on this line.
+    pub gross: Option<f64>,
+    /// Discount amount (positive number in major units) — either from a rate
+    /// or a fixed value, whichever applied. None when no discount.
+    pub discount: Option<f64>,
+    /// "rate:10" or "fixed" — for template styling.
+    pub discount_label: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,6 +108,10 @@ pub struct TotalsData {
     pub tax_lines: Vec<TaxLine>,
     pub tax_total: f64,
     pub total: f64,
+    /// Invoice-level discount in major units, if any. Applied between
+    /// subtotal and tax — i.e. subtotal_after_discount = subtotal - discount.
+    pub discount: Option<f64>,
+    pub discount_label: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -105,14 +123,36 @@ pub struct TaxLine {
 
 pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceData {
     let profile = issuer.jurisdiction.profile();
-    let title = profile.title(issuer.tax_registered).to_string();
+    let title = if inv.kind == "credit_note" {
+        "Credit Note".to_string()
+    } else {
+        profile.title(issuer.tax_registered).to_string()
+    };
 
     let mut items = Vec::with_capacity(inv.items.len());
     let mut subtotal = MinorUnits(0);
     let mut by_rate: std::collections::BTreeMap<String, MinorUnits> = Default::default();
 
     for it in &inv.items {
-        let line = line_total(it.qty, it.unit_price);
+        let gross = line_total(it.qty, it.unit_price);
+        let line = line_total_discounted(
+            it.qty,
+            it.unit_price,
+            it.discount_rate,
+            it.discount_fixed,
+        );
+        let (disc_amt, disc_label) = if gross.0 != line.0 {
+            let diff = MinorUnits(gross.0 - line.0);
+            let label = if let Some(r) = it.discount_rate {
+                format!("rate:{}", r)
+            } else {
+                "fixed".into()
+            };
+            (Some(diff.as_major()), Some(label))
+        } else {
+            (None, None)
+        };
+
         subtotal.0 += line.0;
         let k = it.tax_rate.to_string();
         let entry = by_rate.entry(k).or_insert(MinorUnits(0));
@@ -126,21 +166,49 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
             unit_price: it.unit_price.as_major(),
             tax_rate: it.tax_rate.to_f64().unwrap_or(0.0),
             amount: line.as_major(),
+            gross: if disc_amt.is_some() { Some(gross.as_major()) } else { None },
+            discount: disc_amt,
+            discount_label: disc_label,
         });
     }
 
+    // Invoice-level discount: apply to the pre-tax subtotal (and proportionally
+    // adjust the tax bases so tax is calculated on post-discount amounts).
+    let (inv_discount_minor, inv_discount_label) = match (&inv.discount_rate, &inv.discount_fixed) {
+        (Some(r), _) => {
+            let cut = apply_rate(subtotal, *r);
+            (cut.0.min(subtotal.0), Some(format!("rate:{}", r)))
+        }
+        (None, Some(fx)) => (fx.0.min(subtotal.0), Some("fixed".into())),
+        _ => (0, None),
+    };
+
+    let subtotal_after_discount = MinorUnits(subtotal.0 - inv_discount_minor);
+    // Scale each tax base by (subtotal_after / subtotal_before) to keep tax
+    // accurate when an invoice-level discount applies. If subtotal is zero,
+    // no scaling happens.
     let mut tax_lines = Vec::new();
     let mut tax_total = MinorUnits(0);
     for (rate_str, base) in &by_rate {
         let rate = Decimal::from_str(rate_str).unwrap_or_default();
-        let amt = tax_amount(*base, rate);
+        let scaled_base = if subtotal.0 > 0 && inv_discount_minor > 0 {
+            MinorUnits(
+                ((base.0 as i128) * (subtotal_after_discount.0 as i128)
+                    / (subtotal.0 as i128)) as i64,
+            )
+        } else {
+            *base
+        };
+        let amt = tax_amount(scaled_base, rate);
         tax_total.0 += amt.0;
         tax_lines.push(TaxLine {
             rate: rate.to_f64().unwrap_or(0.0),
-            base: base.as_major(),
+            base: scaled_base.as_major(),
             amount: amt.as_major(),
         });
     }
+
+    let total = MinorUnits(subtotal_after_discount.0 + tax_total.0);
 
     InvoiceData {
         issuer: IssuerData {
@@ -159,6 +227,7 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
                     bic: issuer.bank_bic.clone()?,
                 })
             }),
+            logo: None, // populated below by resolve_logo when rendering
         },
         client: ClientData {
             name: client.name.clone(),
@@ -176,16 +245,24 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
             tax_label: inv.tax_label.clone(),
             title,
             reverse_charge: inv.reverse_charge,
+            kind: if inv.kind == "credit_note" { "credit-note".into() } else { "invoice".into() },
+            credits_number: None, // populated below
         },
         items,
         totals: TotalsData {
             subtotal: subtotal.as_major(),
             tax_lines,
             tax_total: tax_total.as_major(),
-            total: MinorUnits(subtotal.0 + tax_total.0).as_major(),
+            total: total.as_major(),
+            discount: if inv_discount_minor > 0 {
+                Some(MinorUnits(inv_discount_minor).as_major())
+            } else {
+                None
+            },
+            discount_label: inv_discount_label,
         },
         notes: inv.notes.clone().unwrap_or_default(),
-        qr: None, // Caller can set via build_data_with_qr below
+        qr: None,
     }
 }
 
@@ -259,7 +336,23 @@ pub fn render_invoice_with_qr(
         )));
     }
 
-    let data = build_data_with_qr(inv, issuer, client, qr_data);
+    let mut data = build_data_with_qr(inv, issuer, client, qr_data);
+    // Copy logo into the assets dir so typst (sandboxed to --root=assets) can
+    // reach it. The dict field becomes a root-relative path like
+    // "/shared/logo-<slug>.png".
+    data.issuer.logo = resolve_logo(issuer)?;
+    // For credit notes, look up the referenced source invoice's number.
+    if inv.kind == "credit_note" {
+        if let Some(src_id) = inv.credits_invoice_id {
+            if let Ok(conn) = crate::db::open() {
+                if let Ok(list) = db::invoice_list(&conn, None, None) {
+                    if let Some(src) = list.into_iter().find(|x| x.id == src_id) {
+                        data.invoice.credits_number = Some(src.number);
+                    }
+                }
+            }
+        }
+    }
     inject_sample_data(&data)?;
 
     let template_path = typst_assets::template_path(template)?;
@@ -284,6 +377,51 @@ pub fn render_invoice_with_qr(
     Ok(())
 }
 
+/// Copy the issuer's logo file into `<assets>/shared/logo-<slug>.<ext>` so
+/// Typst can reference it (Typst is sandboxed to --root). Returns the
+/// root-relative path, or None if no logo is configured / the file doesn't
+/// exist.
+fn resolve_logo(issuer: &Issuer) -> Result<Option<String>> {
+    let Some(src_raw) = &issuer.logo_path else {
+        return Ok(None);
+    };
+    let src_expanded = expand_tilde(src_raw);
+    let src = Path::new(&src_expanded);
+    if !src.exists() {
+        // Configured but missing — warn by rendering without, don't hard-fail
+        eprintln!("warning: logo '{}' not found for issuer '{}' — rendering without", src.display(), issuer.slug);
+        return Ok(None);
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let dest_rel = format!("shared/logo-{}.{ext}", issuer.slug);
+    let dest_abs = typst_assets::project_root()?.join(&dest_rel);
+    if let Some(parent) = dest_abs.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // Copy only if source is newer or dest missing.
+    let needs_copy = match (std::fs::metadata(src), std::fs::metadata(&dest_abs)) {
+        (Ok(a), Ok(b)) => a.modified().ok() > b.modified().ok(),
+        _ => true,
+    };
+    if needs_copy {
+        std::fs::copy(src, &dest_abs)?;
+    }
+    Ok(Some(format!("/{dest_rel}")))
+}
+
+fn expand_tilde(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return format!("{home}/{rest}");
+        }
+    }
+    s.to_string()
+}
+
 fn inject_sample_data(data: &InvoiceData) -> Result<()> {
     let shared = typst_assets::shared_dir()?;
     let invoice_path = shared.join("invoice.typ");
@@ -302,13 +440,36 @@ fn inject_sample_data(data: &InvoiceData) -> Result<()> {
 
 fn generate_sample_data_typ(d: &InvoiceData) -> String {
     format!(
-        "#let sample-data = (\n  issuer: {},\n  client: {},\n  invoice: {},\n  items: {},\n  notes: {},\n  qr: {},\n)",
+        "#let sample-data = (\n  issuer: {},\n  client: {},\n  invoice: {},\n  items: {},\n  totals-override: {},\n  notes: {},\n  qr: {},\n)",
         typst_dict_issuer(&d.issuer),
         typst_dict_client(&d.client),
         typst_dict_invoice(&d.invoice),
         typst_array_items(&d.items),
+        typst_dict_totals(&d.totals),
         typst_string(&d.notes),
         typst_qr(&d.qr),
+    )
+}
+
+fn typst_dict_totals(t: &TotalsData) -> String {
+    let tax_lines: Vec<String> = t
+        .tax_lines
+        .iter()
+        .map(|tl| format!("(rate: {}, base: {}, amount: {})", tl.rate, tl.base, tl.amount))
+        .collect();
+    let tax_lines_str = if tax_lines.is_empty() {
+        "()".to_string()
+    } else {
+        format!("({},)", tax_lines.join(", "))
+    };
+    format!(
+        "(subtotal: {}, tax-lines: {}, tax-total: {}, total: {}, discount: {}, discount-label: {})",
+        t.subtotal,
+        tax_lines_str,
+        t.tax_total,
+        t.total,
+        t.discount.map(|v| v.to_string()).unwrap_or_else(|| "none".into()),
+        typst_opt(&t.discount_label),
     )
 }
 
@@ -350,8 +511,14 @@ fn typst_opt(s: &Option<String>) -> String {
 }
 
 fn typst_array(lines: &[String]) -> String {
+    // Trailing comma is required — `("a")` is a string in Typst, `("a",)` is
+    // a single-element array. Always emit the comma so parsing is correct
+    // for any length ≥ 1.
     let items: Vec<String> = lines.iter().map(|l| typst_string(l)).collect();
-    format!("({})", items.join(", "))
+    if items.is_empty() {
+        return "()".into();
+    }
+    format!("({},)", items.join(", "))
 }
 
 fn typst_dict_issuer(i: &IssuerData) -> String {
@@ -365,7 +532,7 @@ fn typst_dict_issuer(i: &IssuerData) -> String {
         None => "none".into(),
     };
     format!(
-        "(name: {}, legal-name: {}, tagline: {}, address: {}, email: {}, phone: {}, tax-id: {}, company-no: {}, bank: {})",
+        "(name: {}, legal-name: {}, tagline: {}, address: {}, email: {}, phone: {}, tax-id: {}, company-no: {}, bank: {}, logo: {})",
         typst_string(&i.name),
         typst_opt(&i.legal_name),
         typst_opt(&i.tagline),
@@ -375,6 +542,7 @@ fn typst_dict_issuer(i: &IssuerData) -> String {
         typst_opt(&i.tax_id),
         typst_opt(&i.company_no),
         bank,
+        typst_opt(&i.logo),
     )
 }
 
@@ -390,7 +558,7 @@ fn typst_dict_client(c: &ClientData) -> String {
 
 fn typst_dict_invoice(m: &InvoiceMeta) -> String {
     format!(
-        "(number: {}, issue-date: {}, due-date: {}, terms: {}, currency: {}, symbol: {}, tax-label: {}, title: {}, reverse-charge: {})",
+        "(number: {}, issue-date: {}, due-date: {}, terms: {}, currency: {}, symbol: {}, tax-label: {}, title: {}, reverse-charge: {}, kind: {}, credits-number: {})",
         typst_string(&m.number),
         typst_string(&m.issue_date),
         typst_string(&m.due_date),
@@ -400,6 +568,8 @@ fn typst_dict_invoice(m: &InvoiceMeta) -> String {
         typst_string(&m.tax_label),
         typst_string(&m.title),
         if m.reverse_charge { "true" } else { "false" },
+        typst_string(&m.kind),
+        typst_opt(&m.credits_number),
     )
 }
 
@@ -416,15 +586,23 @@ fn typst_array_items(items: &[ItemData]) -> String {
         .iter()
         .map(|it| {
             format!(
-                "(description: {}, subtitle: {}, qty: {}, unit: {}, unit-price: {}, tax-rate: {})",
+                "(description: {}, subtitle: {}, qty: {}, unit: {}, unit-price: {}, tax-rate: {}, amount: {}, gross: {}, discount: {}, discount-label: {})",
                 typst_string(&it.description),
                 typst_opt(&it.subtitle),
                 it.qty,
                 typst_string(&it.unit),
                 it.unit_price,
                 it.tax_rate,
+                it.amount,
+                it.gross.map(|v| v.to_string()).unwrap_or_else(|| "none".into()),
+                it.discount.map(|v| v.to_string()).unwrap_or_else(|| "none".into()),
+                typst_opt(&it.discount_label),
             )
         })
         .collect();
+    if parts.is_empty() {
+        return "()".into();
+    }
+    // Trailing comma ensures single-element case parses as array, not tuple.
     format!("(\n    {},\n  )", parts.join(",\n    "))
 }

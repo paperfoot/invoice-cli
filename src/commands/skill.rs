@@ -39,6 +39,39 @@ invoice issuer set-template acme boutique    # shorthand for --template
 invoice clients set-issuer meridian acme     # shorthand
 ```
 
+### Logo
+
+Attach a logo image (PNG/SVG/JPG) to an issuer; the template renders it in the header.
+
+```
+invoice issuer edit acme --logo ~/Pictures/acme.png
+```
+
+### Editing drafts & credit notes
+
+DRAFT invoices are mutable; once `issued`/`paid`/`void` they're immutable — use a credit note.
+
+```
+invoice invoices edit 2026-0001 --notes "Net 14 — early-payment 2% discount"
+invoice invoices items 2026-0001 add "Extra fee:1:500"
+invoice invoices credit-note 2026-0001 --item "Refund:1:-500" --notes "Goodwill credit"
+```
+
+### Aging & export
+
+```
+invoice invoices aging                                                        # 0-30/31-60/61-90/90+ buckets
+invoice invoices export --from 2026-01-01 --to 2026-03-31 --format csv --out q1.csv
+```
+
+### Discounts
+
+Apply a discount at invoice level (percent OR fixed amount, mutually exclusive).
+
+```
+invoice invoices new --client meridian --item design --discount-rate 10
+```
+
 ### Tips
 
 - Run `invoice agent-info` for the full JSON capability manifest.

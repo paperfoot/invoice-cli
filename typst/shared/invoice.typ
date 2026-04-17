@@ -24,6 +24,7 @@
       iban: "XX00 XXXX 0000 0000 0000",
       bic: "XXXXXX00",
     ),
+    logo: none,
   ),
   client: (
     name: "Meridian & Co.",
@@ -43,30 +44,40 @@
     currency: "SGD",
     symbol: "S$",
     tax-label: "GST",
+    title: "Tax Invoice",
+    reverse-charge: false,
+    kind: "invoice",
+    credits-number: none,
   ),
   items: (
     (
       description: "Design engagement",
       subtitle: "Discovery, prototyping, production handover",
       qty: 1.0, unit: "project", unit-price: 8400.0, tax-rate: 9.0,
+      amount: 8400.0, gross: none, discount: none, discount-label: none,
     ),
     (
       description: "Interface build — web app",
       subtitle: "Twelve screens, component library, deployment",
       qty: 1.0, unit: "project", unit-price: 12600.0, tax-rate: 9.0,
+      amount: 12600.0, gross: none, discount: none, discount-label: none,
     ),
     (
       description: "Strategy workshop",
       subtitle: "Two-day intensive, HQ",
       qty: 2.0, unit: "day", unit-price: 1800.0, tax-rate: 9.0,
+      amount: 3600.0, gross: none, discount: none, discount-label: none,
     ),
     (
       description: "Export services — overseas client",
       subtitle: "Zero-rated under Section 21(3) GST Act",
       qty: 1.0, unit: "engagement", unit-price: 1200.0, tax-rate: 0.0,
+      amount: 1200.0, gross: none, discount: none, discount-label: none,
     ),
   ),
+  totals-override: none,
   notes: "Thank you for the trusted work. Please reference the invoice number on payment. Example placeholder — replace in production with your own issuer details.",
+  qr: none,
 )
 
 // ─── Money formatting with thousands separator ─────────────────────────────
@@ -94,7 +105,9 @@
   let subtotal = 0.0
   let by-rate = (:)
   for item in items {
-    let line = item.qty * item.unit-price
+    // Prefer the pre-computed `amount` (post-discount, from Rust) when
+    // present; else fall back to qty × unit-price for legacy/preview data.
+    let line = if "amount" in item and item.amount != none { item.amount } else { item.qty * item.unit-price }
     subtotal += line
     let k = str(item.tax-rate)
     if k in by-rate {
@@ -116,7 +129,20 @@
     tax-lines: tax-lines,
     tax-total: tax-total,
     total: subtotal + tax-total,
+    discount: none,
+    discount-label: none,
   )
+}
+
+// Use Rust-precomputed totals (rust_decimal precision, discount-aware) when
+// available; otherwise compute from items. Templates should call this instead
+// of compute-totals directly.
+#let resolve-totals(d) = {
+  if "totals-override" in d and d.totals-override != none {
+    d.totals-override
+  } else {
+    compute-totals(d.items)
+  }
 }
 
 #let star-mark(size: 14pt, color: black) = {

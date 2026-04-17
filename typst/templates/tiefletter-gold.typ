@@ -2,11 +2,11 @@
 // Template: tiefletter-gold — Editorial luxury (restrained)
 // ═══════════════════════════════════════════════════════════════════════════
 
-#import "../shared/invoice.typ": sample-data, compute-totals, star-mark
+#import "../shared/invoice.typ": sample-data, compute-totals, resolve-totals, star-mark, money
 #import "../shared/components.typ": *
 
 #let d = sample-data
-#let totals = compute-totals(d.items)
+#let totals = resolve-totals(d)
 
 #let theme = (
   ink: rgb("#1A1512"),
@@ -45,6 +45,10 @@
   align: (left + horizon, right + horizon),
   column-gutter: 10mm,
   [
+    #if "logo" in d.issuer and d.issuer.logo != none [
+      #image(d.issuer.logo, height: 12mm)
+      #v(2mm)
+    ]
     #grid(
       columns: (auto, auto),
       column-gutter: 8pt,
@@ -62,13 +66,16 @@
     ]
   ],
   [
-    #align(right, text(font: theme.display-font, size: 26pt, weight: 400, style: "italic", fill: theme.ink)[Invoice])
+    #align(right, text(font: theme.display-font, size: 26pt, weight: 400, style: "italic", fill: theme.ink)[#d.invoice.title])
     #v(-1pt)
     #align(right, fit-size(
       (10pt, 9.5pt, 9pt),
       80mm,
       s => text(font: theme.body-font, size: s, tracking: 0.8pt, fill: theme.accent)[N\u{00BA} #d.invoice.number],
     ))
+    #if d.invoice.kind == "credit-note" and d.invoice.credits-number != none [
+      #align(right, text(size: 8.5pt, style: "italic", fill: theme.mute)[re: Invoice N\u{00BA} #d.invoice.credits-number])
+    ]
   ],
 )
 
@@ -113,8 +120,58 @@
 
 // ─── ITEMS + TOTALS ──────────────────────────────────────────────────────
 #line-items-table(d.items, theme, currency-symbol: d.invoice.symbol, tax-label: d.invoice.tax-label)
+
+// Line-level discount summary — editorial italic, gold accent.
+#let discounted-items = d.items.filter(it => "discount" in it and it.discount != none)
+#if discounted-items.len() > 0 [
+  #v(sp.xs)
+  #align(right)[
+    #box(width: 90mm)[
+      #for it in discounted-items [
+        #grid(
+          columns: (1fr, auto),
+          column-gutter: sp.l,
+          align: (left, right),
+          text(size: 8pt, style: "italic", fill: theme.mute)[
+            #it.description ·
+            #if it.discount-label != none and it.discount-label.starts-with("rate:") {
+              "less " + it.discount-label.slice(5) + "%"
+            } else { "discount" }
+          ],
+          text(size: 8pt, style: "italic", fill: theme.mute)[−#money(it.discount, symbol: d.invoice.symbol)],
+        )
+      ]
+    ]
+  ]
+]
+
 #v(mm-sp.s)
 #tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 90mm, tax-label: d.invoice.tax-label)
+
+// Invoice-level discount row.
+#if "discount" in totals and totals.discount != none [
+  #v(sp.s)
+  #align(right)[
+    #box(width: 90mm)[
+      #grid(
+        columns: (1fr, auto),
+        column-gutter: sp.xl,
+        align: (left, right),
+        text(size: 9.5pt, style: "italic", fill: theme.mute)[#if totals.discount-label != none { totals.discount-label } else { "Discount" }],
+        text(size: 9.5pt, fill: theme.accent)[−#money(totals.discount, symbol: d.invoice.symbol)],
+      )
+    ]
+  ]
+]
+
+// Reverse-charge callout — hairline gold frame matching editorial feel.
+#if d.invoice.reverse-charge [
+  #v(mm-sp.m)
+  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.hair, [
+    #text(weight: "medium", size: 9pt, fill: theme.ink)[Reverse charge]\
+    #text(size: 8pt, style: "italic", fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
+  ])
+]
 
 // ─── PAYMENT + NOTES ─────────────────────────────────────────────────────
 #v(mm-sp.m)
