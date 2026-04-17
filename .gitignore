@@ -17,3 +17,4 @@ state/
 config.toml
 *.db
 *.db-*
+.cargo/config.toml

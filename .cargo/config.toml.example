@@ -1,0 +1,13 @@
+# Local-only override for hacking on finance-core alongside invoice-cli
+# without a crates.io round-trip on every change. Copy to
+# `.cargo/config.toml` (gitignored) and adjust the path if needed.
+#
+# Usage:
+#   cp .cargo/config.toml.example .cargo/config.toml
+#   # requires finance-core checked out at ../finance-core/
+#
+# Removed automatically by `cargo publish` since [patch] is stripped from
+# published crates.
+
+[patch.crates-io]
+finance-core = { path = "../finance-core" }

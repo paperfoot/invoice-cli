@@ -419,6 +419,8 @@ dependencies = [
 [[package]]
 name = "finance-core"
 version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39d58eb6c9c0da41e56b187d35455e8a867a98db5da12c5b0e9b572f261f270a"
 dependencies = [
  "chrono",
  "directories",
