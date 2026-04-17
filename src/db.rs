@@ -1,5 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Database layer — SQLite via rusqlite, migrations via refinery.
+// Database layer — invoice-cli queries over the shared finance-core SQLite.
+//
+// Connection opening, the refinery migration runner, and the `Issuer`
+// primitive all live in finance-core so the whole accounting suite shares
+// one schema and one DB file. This file owns the invoice-specific queries
+// (clients, products, invoices, invoice_items, number_series).
 // ═══════════════════════════════════════════════════════════════════════════
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -8,66 +13,22 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::config;
 use crate::error::{AppError, Result};
 use crate::money::MinorUnits;
 use crate::tax::Jurisdiction;
 
-mod embedded {
-    use refinery::embed_migrations;
-    embed_migrations!("./migrations");
-}
+pub use finance_core::entity::Issuer;
 
 pub fn open() -> Result<Connection> {
-    let path = config::db_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut conn = Connection::open(&path)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "foreign_keys", "ON")?;
-    embedded::migrations::runner()
-        .run(&mut conn)
-        .map_err(AppError::Migration)?;
-    Ok(conn)
+    let paths = finance_core::paths::Paths::resolve()?;
+    Ok(finance_core::db::open(&paths)?)
 }
 
 pub fn open_at(path: &Path) -> Result<Connection> {
-    let mut conn = Connection::open(path)?;
-    conn.pragma_update(None, "foreign_keys", "ON")?;
-    embedded::migrations::runner()
-        .run(&mut conn)
-        .map_err(AppError::Migration)?;
-    Ok(conn)
+    Ok(finance_core::db::open_at(path)?)
 }
 
 // ─── Domain types ────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Issuer {
-    pub id: i64,
-    pub slug: String,
-    pub name: String,
-    pub legal_name: Option<String>,
-    pub jurisdiction: Jurisdiction,
-    pub tax_registered: bool,
-    pub tax_id: Option<String>,
-    pub company_no: Option<String>,
-    pub tagline: Option<String>,
-    pub address: Vec<String>,
-    pub email: Option<String>,
-    pub phone: Option<String>,
-    pub bank_name: Option<String>,
-    pub bank_iban: Option<String>,
-    pub bank_bic: Option<String>,
-    pub default_template: String,
-    pub currency: Option<String>,
-    pub symbol: Option<String>,
-    pub number_format: String,
-    /// Filesystem path to a logo image (PNG/SVG/JPG). Rendered in template
-    /// header when set.
-    pub logo_path: Option<String>,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Client {

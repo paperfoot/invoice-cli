@@ -420,8 +420,16 @@ dependencies = [
 name = "finance-core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "directories",
+ "figment",
+ "refinery",
+ "rusqlite",
  "rust_decimal",
  "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "toml",
 ]
 
 [[package]]
@@ -682,11 +690,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "directories",
- "figment",
  "finance-core",
  "qrcode",
- "refinery",
  "rusqlite",
  "rust-embed",
  "rust_decimal",

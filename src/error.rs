@@ -20,14 +20,14 @@ pub enum AppError {
     #[error("Database error: {0}")]
     Db(#[from] rusqlite::Error),
 
-    #[error("Migration error: {0}")]
-    Migration(#[from] refinery::Error),
-
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
 
     #[error("Typst render error: {0}")]
     Render(String),
+
+    #[error(transparent)]
+    Core(#[from] finance_core::error::CoreError),
 
     #[error("Other: {0}")]
     Other(String),
@@ -40,7 +40,8 @@ impl AppError {
             Self::Config(_) => 2,
             Self::NotFound(_) => 3,
             Self::Io(_) | Self::Render(_) | Self::Other(_) => 1,
-            Self::Db(_) | Self::Migration(_) | Self::Serde(_) => 1,
+            Self::Db(_) | Self::Serde(_) => 1,
+            Self::Core(_) => 1,
         }
     }
 
@@ -52,9 +53,9 @@ impl AppError {
             Self::NotFound(_) => "not_found",
             Self::Io(_) => "io_error",
             Self::Db(_) => "db_error",
-            Self::Migration(_) => "migration_error",
             Self::Serde(_) => "serde_error",
             Self::Render(_) => "render_error",
+            Self::Core(_) => "core_error",
             Self::Other(_) => "other",
         }
     }
@@ -67,9 +68,9 @@ impl AppError {
             Self::NotFound(_) => "List available entities with: invoice <kind> list",
             Self::Io(_) => "Retry the command",
             Self::Db(_) => "Check database integrity: invoice doctor",
-            Self::Migration(_) => "Database migration failed — check doctor",
             Self::Serde(_) => "Malformed data — check input",
             Self::Render(_) => "Typst render failed — run: invoice doctor",
+            Self::Core(_) => "Check diagnostics: invoice doctor",
             Self::Other(_) => "",
         }
     }
