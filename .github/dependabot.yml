@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Auto-bump the finance-core dep + all other crates.io deps weekly.
+  # When finance-core ships a new version, Dependabot opens a PR; merge it,
+  # tag a new invoice-cli version, and the release workflow publishes the
+  # rebuilt binary with the new finance-core baked in.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      finance-core:
+        patterns:
+          - "finance-core"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
