@@ -1,6 +1,6 @@
 [package]
 name = "invoice-cli"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 description = "Beautiful invoices from the CLI — international, stateful, agent-friendly"
 license = "MIT"

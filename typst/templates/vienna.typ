@@ -49,15 +49,15 @@
   align: (left + horizon, right + horizon),
   column-gutter: 10mm,
   [
-    #if "logo" in d.issuer and d.issuer.logo != none [
-      #image(d.issuer.logo, height: 10mm)
-      #v(2mm)
-    ]
     #grid(
       columns: (auto, auto),
-      column-gutter: 8pt,
+      column-gutter: 10pt,
       align: (horizon, horizon),
-      star-mark(size: 13pt, color: theme.accent),
+      if "logo" in d.issuer and d.issuer.logo != none {
+        image(d.issuer.logo, height: 10mm)
+      } else {
+        star-mark(size: 13pt, color: theme.accent)
+      },
       fit-size(
         (13pt, 11.5pt, 10pt),
         90mm,
