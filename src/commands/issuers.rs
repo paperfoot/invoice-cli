@@ -21,6 +21,8 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             bank_line,
             template,
             logo,
+            output_dir,
+            notes,
         } => {
             let jur = Jurisdiction::from_str(&jurisdiction).ok_or_else(|| {
                 AppError::InvalidInput(format!(
@@ -51,6 +53,8 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                 symbol: Some(profile.symbol.to_string()),
                 number_format: "{year}-{seq:04}".into(),
                 logo_path: logo,
+                default_output_dir: output_dir,
+                default_notes: notes,
             };
             let id = db::issuer_create(&conn, &issuer)?;
             let mut out = issuer.clone();
@@ -101,6 +105,8 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             bank_line,
             bank_clear,
             template,
+            output_dir,
+            notes,
             currency,
             symbol,
             number_format,
@@ -150,11 +156,30 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             if let Some(v) = template {
                 issuer.default_template = v;
             }
+            if let Some(v) = output_dir {
+                issuer.default_output_dir = Some(v);
+            }
+            if let Some(v) = notes {
+                issuer.default_notes = Some(v);
+            }
+            // Currency + symbol auto-linking: if user sets currency but
+            // doesn't supply a symbol, derive the conventional one via
+            // finance_core::money::currency_symbol. An explicit --symbol
+            // still wins when both are given.
+            let currency_changed = currency.is_some();
             if let Some(v) = currency {
-                issuer.currency = Some(v);
+                if !v.is_empty() {
+                    let derived = finance_core::money::currency_symbol(&v);
+                    if symbol.is_none() && !derived.is_empty() {
+                        issuer.symbol = Some(derived.to_string());
+                    }
+                    issuer.currency = Some(v);
+                }
             }
             if let Some(v) = symbol {
                 issuer.symbol = Some(v);
+            } else if !currency_changed {
+                // no-op: neither currency nor symbol changed
             }
             if let Some(v) = number_format {
                 issuer.number_format = v;

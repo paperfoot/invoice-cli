@@ -8,7 +8,7 @@ use crate::db::{self, Invoice, InvoiceItem};
 use crate::error::{AppError, Result};
 use crate::money::MinorUnits;
 use crate::output::{print_success, Ctx, Format};
-use crate::render;
+use crate::render::{self, default_invoice_dir, expand_tilde};
 
 pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
     let mut conn = db::open()?;
@@ -44,10 +44,22 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             let use_currency = currency
                 .or(issuer.currency.clone())
                 .unwrap_or_else(|| profile.currency.to_string());
-            let use_symbol = issuer
-                .symbol
-                .clone()
-                .unwrap_or_else(|| profile.symbol.to_string());
+            // Symbol resolution: use the issuer's explicit symbol only when
+            // the invoice currency actually matches the issuer's currency.
+            // Otherwise derive from the active currency (e.g. "GBP" → "£").
+            // This keeps a SG issuer billing in GBP from showing "S$" on
+            // the invoice.
+            let derived_symbol = finance_core::money::currency_symbol(&use_currency);
+            let use_symbol = if issuer.currency.as_deref() == Some(use_currency.as_str()) {
+                issuer.symbol.clone().unwrap_or_else(|| derived_symbol.to_string())
+            } else if !derived_symbol.is_empty() {
+                derived_symbol.to_string()
+            } else {
+                profile.symbol.to_string()
+            };
+
+            // Notes fallback: if --notes not given, use the issuer's default.
+            let use_notes = notes.or_else(|| issuer.default_notes.clone());
 
             let parsed_items = parse_items(&conn, &items, &profile)?;
 
@@ -66,7 +78,7 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                 symbol: use_symbol,
                 tax_label: profile.tax_label.to_string(),
                 status: "draft".into(),
-                notes,
+                notes: use_notes,
                 reverse_charge,
                 pay_link,
                 issued_at: None,
@@ -581,11 +593,40 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                     "vienna".into()
                 }
             });
-            let out_path = out
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(format!("invoice-{}.pdf", inv.number)));
+            // Output path resolution chain:
+            //   1. --out CLI arg (explicit)
+            //   2. issuer.default_output_dir + invoice number (per-company)
+            //   3. ~/Documents/Invoices/ + invoice number (suite-wide fallback)
+            // `~/` is expanded in steps 2 + 3. Parent directories created.
+            let filename = format!("{}.pdf", inv.number);
+            let out_path = match out {
+                Some(o) => expand_tilde(&o).into(),
+                None => {
+                    let base: PathBuf = match issuer.default_output_dir.as_deref() {
+                        Some(d) if !d.is_empty() => expand_tilde(d).into(),
+                        _ => default_invoice_dir(),
+                    };
+                    std::fs::create_dir_all(&base)?;
+                    base.join(&filename)
+                }
+            };
+            if let Some(parent) = out_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
 
             render::render_invoice_with_qr(&tmpl, &inv, &issuer, &client, inv.pay_link.as_deref(), &out_path)?;
+
+            // Immutable archive: always also write a byte-identical copy to
+            // <data_dir>/rendered/<year>/<invoice-number>.pdf. The issue-event
+            // PDF is recoverable even after templates / issuer settings drift.
+            let year = inv.issue_date.get(..4).unwrap_or("unknown");
+            let archive_dir = finance_core::paths::Paths::resolve()?
+                .data_dir
+                .join("rendered")
+                .join(year);
+            std::fs::create_dir_all(&archive_dir)?;
+            let archive_path = archive_dir.join(&filename);
+            std::fs::copy(&out_path, &archive_path)?;
 
             if open {
                 #[cfg(target_os = "macos")]
@@ -596,8 +637,15 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
 
             print_success(
                 ctx,
-                &serde_json::json!({ "number": inv.number, "path": out_path }),
-                |_| println!("rendered → {}", out_path.display()),
+                &serde_json::json!({
+                    "number": inv.number,
+                    "path": out_path,
+                    "archive": archive_path,
+                }),
+                |_| {
+                    println!("rendered → {}", out_path.display());
+                    println!("archived → {}", archive_path.display());
+                },
             );
             Ok(())
         }

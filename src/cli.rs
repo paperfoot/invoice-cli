@@ -94,6 +94,16 @@ pub enum IssuerCmd {
         /// Path to a logo image (PNG/SVG/JPG). Rendered in template header.
         #[arg(long)]
         logo: Option<String>,
+        /// Default directory for `invoices render` output when --out is
+        /// omitted. Leading `~/` is expanded. Example:
+        ///   --output-dir "~/Documents/Invoices/Paperfoot"
+        #[arg(long)]
+        output_dir: Option<String>,
+        /// Default notes auto-populated into new invoices (free-form
+        /// multi-line). Use for payment terms, reverse-charge disclaimers,
+        /// etc.
+        #[arg(long)]
+        notes: Option<String>,
     },
     /// Edit an existing issuer — pass only the fields you want to change
     Edit {
@@ -136,6 +146,13 @@ pub enum IssuerCmd {
         number_format: Option<String>,
         #[arg(long)]
         logo: Option<String>,
+        /// Default directory for `invoices render` output when --out is
+        /// omitted. Leading `~/` is expanded.
+        #[arg(long)]
+        output_dir: Option<String>,
+        /// Default notes auto-populated into new invoices.
+        #[arg(long)]
+        notes: Option<String>,
     },
     /// Shorthand: change the issuer's default template
     SetTemplate {

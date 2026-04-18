@@ -418,9 +418,9 @@ dependencies = [
 
 [[package]]
 name = "finance-core"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbbc326702d71bdc459cfd5116985e0fedb08f01dabc030170fdac6f7d6d0700"
+checksum = "c16a862e1cb204aded29eab97da893143e4ef2466c7232cfc0cf5caec930423c"
 dependencies = [
  "chrono",
  "directories",
@@ -687,7 +687,7 @@ checksum = "c8fae54786f62fb2918dcfae3d568594e50eb9b5c25bf04371af6fe7516452fb"
 
 [[package]]
 name = "invoice-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "chrono",

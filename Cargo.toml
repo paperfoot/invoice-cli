@@ -1,6 +1,6 @@
 [package]
 name = "invoice-cli"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Beautiful invoices from the CLI — international, stateful, agent-friendly"
 license = "MIT"
@@ -17,7 +17,7 @@ path = "src/main.rs"
 path = "src/lib.rs"
 
 [dependencies]
-finance-core = "0.2"
+finance-core = "0.3"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

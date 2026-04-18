@@ -136,8 +136,9 @@ pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
         "INSERT INTO issuers (slug, name, legal_name, jurisdiction, tax_registered,
                               tax_id, company_no, tagline, address, email, phone,
                               bank_details, default_template,
-                              currency, symbol, number_format, logo_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                              currency, symbol, number_format, logo_path,
+                              default_output_dir, default_notes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             issuer.slug,
             issuer.name,
@@ -156,6 +157,8 @@ pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
             issuer.symbol,
             issuer.number_format,
             issuer.logo_path,
+            issuer.default_output_dir,
+            issuer.default_notes,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -166,7 +169,8 @@ pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
         "SELECT id, slug, name, legal_name, jurisdiction, tax_registered,
                 tax_id, company_no, tagline, address, email, phone,
                 bank_details, default_template,
-                currency, symbol, number_format, logo_path
+                currency, symbol, number_format, logo_path,
+                default_output_dir, default_notes
          FROM issuers ORDER BY slug",
     )?;
     let rows = stmt
@@ -191,6 +195,8 @@ pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
                 symbol: row.get(15)?,
                 number_format: row.get(16)?,
                 logo_path: row.get(17)?,
+                default_output_dir: row.get(18)?,
+                default_notes: row.get(19)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -239,8 +245,9 @@ pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
              name = ?1, legal_name = ?2, jurisdiction = ?3, tax_registered = ?4,
              tax_id = ?5, company_no = ?6, tagline = ?7, address = ?8,
              email = ?9, phone = ?10, bank_details = ?11, default_template = ?12,
-             currency = ?13, symbol = ?14, number_format = ?15, logo_path = ?16
-         WHERE slug = ?17",
+             currency = ?13, symbol = ?14, number_format = ?15, logo_path = ?16,
+             default_output_dir = ?17, default_notes = ?18
+         WHERE slug = ?19",
         params![
             issuer.name,
             issuer.legal_name,
@@ -258,6 +265,8 @@ pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
             issuer.symbol,
             issuer.number_format,
             issuer.logo_path,
+            issuer.default_output_dir,
+            issuer.default_notes,
             issuer.slug,
         ],
     )?;

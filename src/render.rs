@@ -414,13 +414,22 @@ fn resolve_logo(issuer: &Issuer) -> Result<Option<String>> {
     Ok(Some(format!("/{dest_rel}")))
 }
 
-fn expand_tilde(s: &str) -> String {
+pub fn expand_tilde(s: &str) -> String {
     if let Some(rest) = s.strip_prefix("~/") {
         if let Ok(home) = std::env::var("HOME") {
             return format!("{home}/{rest}");
         }
     }
     s.to_string()
+}
+
+/// Default directory for rendered invoice PDFs when the issuer has no
+/// `default_output_dir` set and the user didn't pass `--out`.
+/// Macs: `~/Documents/Invoices/`; Linux: `$XDG_DOCUMENTS_DIR/Invoices/`
+/// (falls back to `~/Documents/Invoices/`).
+pub fn default_invoice_dir() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join("Documents").join("Invoices")
 }
 
 fn inject_sample_data(data: &InvoiceData) -> Result<()> {
