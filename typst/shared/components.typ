@@ -537,8 +537,8 @@
   }
   grid(
     columns: (auto, 1fr),
-    column-gutter: 0.8em,
-    row-gutter: 0.3em,
+    column-gutter: sp.m,
+    row-gutter: sp.xs,
     ..cells,
   )
 }
