@@ -512,6 +512,12 @@
 // US ABA routing, EU IBAN, AU BSB — because the caller decides the labels.
 // If `bank` is none (issuer has no bank_details set) the block renders
 // nothing, letting the template lay out without a crash.
+//
+// Typography: labels and values share the same 9.5pt size for visual
+// consistency. Distinction comes from colour (mute for labels) and font
+// family (monospace for values — clean for account numbers, codes, BIC).
+// The only smaller text is the block heading ("Pay to") which inherits
+// its styling from the `lbl` helper.
 #let payment-block(bank, theme, label-text: "Pay to") = {
   if bank == none { return }
   let mute = th(theme, "mute", rgb("#666"))
@@ -521,10 +527,10 @@
   let cells = ()
   for line in bank.lines {
     if line.label != "" {
-      cells.push(text(size: 7.5pt, fill: mute, tracking: 0.08em)[#upper(line.label)])
+      cells.push(text(size: 9.5pt, fill: mute)[#line.label])
       cells.push(text(size: 9.5pt, font: mono)[#line.value])
     } else {
-      // Continuation line without a label — span both columns.
+      // Continuation line without a label — span both columns visually.
       cells.push([])
       cells.push(text(size: 9.5pt, font: mono, fill: mute)[#line.value])
     }
@@ -532,7 +538,7 @@
   grid(
     columns: (auto, 1fr),
     column-gutter: 0.8em,
-    row-gutter: 0.25em,
+    row-gutter: 0.3em,
     ..cells,
   )
 }

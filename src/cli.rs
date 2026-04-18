@@ -291,11 +291,12 @@ pub enum InvoiceCmd {
         /// Item in the form: "product-slug" OR "Description:qty:price:rate"
         #[arg(long = "item")]
         items: Vec<String>,
-        /// Due date (e.g. "2026-05-17" or "30d")
-        #[arg(long, default_value = "30d")]
+        /// Due date (e.g. "2026-05-17" or "7d"). Defaults to one week
+        /// after issue.
+        #[arg(long, default_value = "7d")]
         due: String,
-        /// Terms label (default: "Net 30")
-        #[arg(long, default_value = "Net 30")]
+        /// Terms label (default: "Pay in full")
+        #[arg(long, default_value = "Pay in full")]
         terms: String,
         #[arg(long)]
         notes: Option<String>,
@@ -390,8 +391,8 @@ pub enum InvoiceCmd {
         /// Override the issuer (defaults to the source invoice's issuer)
         #[arg(long = "as")]
         r#as: Option<String>,
-        /// New due date (e.g. "2026-05-17" or "30d"). Defaults to "30d".
-        #[arg(long, default_value = "30d")]
+        /// New due date (e.g. "2026-05-17" or "7d"). Defaults to "7d".
+        #[arg(long, default_value = "7d")]
         due: String,
     },
     #[command(alias = "ls")]
