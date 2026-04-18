@@ -54,7 +54,7 @@
       column-gutter: 10pt,
       align: (horizon, horizon),
       if "logo" in d.issuer and d.issuer.logo != none {
-        image(d.issuer.logo, height: 10mm)
+        image(d.issuer.logo, height: 7.5mm)
       } else {
         star-mark(size: 13pt, color: theme.accent)
       },
