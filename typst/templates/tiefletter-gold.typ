@@ -167,7 +167,7 @@
 // Reverse-charge callout — hairline gold frame matching editorial feel.
 #if d.invoice.reverse-charge [
   #v(mm-sp.m)
-  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.hair, [
+  #block(width: 100%, inset: 8pt, stroke: 0.3pt + theme.hair, [
     #text(weight: "medium", size: 9pt, fill: theme.ink)[Reverse charge]\
     #text(size: 8pt, style: "italic", fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
   ])

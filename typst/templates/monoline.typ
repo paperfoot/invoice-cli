@@ -72,7 +72,7 @@
 )
 
 #v(mm-sp.xs)
-#line(length: 100%, stroke: 0.6pt + theme.dim)
+#line(length: 100%, stroke: 0.5pt + theme.dim)
 #v(mm-sp.s)
 
 // ─── PARTIES ─────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@
 // Reverse-charge callout — technical hairline box.
 #if d.invoice.reverse-charge [
   #v(mm-sp.s)
-  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.dim, [
+  #block(width: 100%, inset: 8pt, stroke: 0.3pt + theme.dim, [
     #text(font: theme.mono-font, weight: "medium", size: 9pt, fill: theme.ink)[\[ REVERSE CHARGE \]]\
     #text(font: theme.mono-font, size: 8pt, fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
   ])
@@ -169,7 +169,7 @@
 
 // ─── PAYMENT + NOTES ─────────────────────────────────────────────────────
 #v(mm-sp.m)
-#line(length: 100%, stroke: 0.6pt + theme.dim)
+#line(length: 100%, stroke: 0.5pt + theme.dim)
 #v(mm-sp.xs)
 #block(breakable: false)[
   #if "qr" in d and d.qr != none {

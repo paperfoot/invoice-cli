@@ -166,7 +166,7 @@
 // Reverse-charge callout — minimal hairline box matching Swiss aesthetic.
 #if d.invoice.reverse-charge [
   #v(mm-sp.m)
-  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.hair, [
+  #block(width: 100%, inset: 8pt, stroke: 0.3pt + theme.hair, [
     #text(weight: "medium", size: 9pt, fill: theme.ink)[Reverse charge]\
     #text(size: 8pt, fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
   ])
