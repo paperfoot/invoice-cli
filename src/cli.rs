@@ -146,6 +146,9 @@ pub enum IssuerCmd {
         number_format: Option<String>,
         #[arg(long)]
         logo: Option<String>,
+        /// Remove the logo from the issuer (falls back to the star mark).
+        #[arg(long)]
+        logo_clear: bool,
         /// Default directory for `invoices render` output when --out is
         /// omitted. Leading `~/` is expanded.
         #[arg(long)]

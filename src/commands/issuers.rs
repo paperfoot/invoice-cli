@@ -111,6 +111,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             symbol,
             number_format,
             logo,
+            logo_clear,
         } => {
             let mut issuer = db::issuer_by_slug(&conn, &slug)?;
             if let Some(v) = name {
@@ -184,7 +185,9 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             if let Some(v) = number_format {
                 issuer.number_format = v;
             }
-            if let Some(v) = logo {
+            if logo_clear {
+                issuer.logo_path = None;
+            } else if let Some(v) = logo {
                 issuer.logo_path = Some(v);
             }
             db::issuer_update(&conn, &issuer)?;
