@@ -184,7 +184,7 @@
 // Reverse-charge callout — rendered as a legal-style block before notes.
 #if d.invoice.reverse-charge [
   #v(mm-sp.m)
-  #block(width: 100%, inset: 8pt, stroke: 0.5pt + theme.hair, [
+  #block(width: 100%, inset: 8pt, stroke: 0.3pt + theme.hair, [
     #text(weight: "medium", size: 9pt, fill: theme.ink)[Reverse charge]\
     #text(size: 8pt, fill: theme.mute)[VAT to be accounted for by the recipient under the reverse-charge mechanism.]
   ])
@@ -192,7 +192,7 @@
 
 // ─── PAYMENT + NOTES (Bill from is already up top, no repeat) ──
 #v(mm-sp.l)
-#line(length: 100%, stroke: 0.4pt + theme.ink)
+#line(length: 100%, stroke: 0.3pt + theme.hair)
 #v(mm-sp.s)
 
 #if "qr" in d and d.qr != none {

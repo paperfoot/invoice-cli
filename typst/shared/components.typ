@@ -527,18 +527,21 @@
   let cells = ()
   for line in bank.lines {
     if line.label != "" {
-      cells.push(text(size: 8.5pt, fill: mute)[#line.label])
-      cells.push(text(size: 8.5pt, font: mono)[#line.value])
+      cells.push(text(size: 8.5pt, fill: mute, tracking: 0.02em)[#line.label])
+      cells.push(text(size: 8.5pt, font: mono, number-width: "tabular")[#line.value])
     } else {
       // Continuation line without a label — span both columns visually.
       cells.push([])
-      cells.push(text(size: 8.5pt, font: mono, fill: mute)[#line.value])
+      cells.push(text(size: 8.5pt, font: mono, fill: mute, number-width: "tabular")[#line.value])
     }
   }
   grid(
     columns: (auto, 1fr),
-    column-gutter: sp.m,
+    column-gutter: sp.s,
     row-gutter: sp.xs,
+    // Right-align labels so the colon-less hierarchy shows as a
+    // clean invisible axis between label column and value column.
+    align: (right + top, left + top),
     ..cells,
   )
 }
