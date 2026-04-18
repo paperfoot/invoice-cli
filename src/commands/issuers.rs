@@ -18,9 +18,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             address,
             email,
             phone,
-            bank_name,
-            bank_iban,
-            bank_bic,
+            bank_line,
             template,
             logo,
         } => {
@@ -43,9 +41,11 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                 address: address.split('\n').map(|s| s.to_string()).collect(),
                 email,
                 phone,
-                bank_name,
-                bank_iban,
-                bank_bic,
+                bank_details: if bank_line.is_empty() {
+                    None
+                } else {
+                    Some(bank_line.join("\n"))
+                },
                 default_template: template,
                 currency: Some(profile.currency.to_string()),
                 symbol: Some(profile.symbol.to_string()),
@@ -98,9 +98,8 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             address,
             email,
             phone,
-            bank_name,
-            bank_iban,
-            bank_bic,
+            bank_line,
+            bank_clear,
             template,
             currency,
             symbol,
@@ -143,14 +142,10 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             if let Some(v) = phone {
                 issuer.phone = Some(v);
             }
-            if let Some(v) = bank_name {
-                issuer.bank_name = Some(v);
-            }
-            if let Some(v) = bank_iban {
-                issuer.bank_iban = Some(v);
-            }
-            if let Some(v) = bank_bic {
-                issuer.bank_bic = Some(v);
+            if bank_clear {
+                issuer.bank_details = None;
+            } else if !bank_line.is_empty() {
+                issuer.bank_details = Some(bank_line.join("\n"));
             }
             if let Some(v) = template {
                 issuer.default_template = v;

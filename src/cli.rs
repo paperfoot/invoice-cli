@@ -82,12 +82,13 @@ pub enum IssuerCmd {
         email: Option<String>,
         #[arg(long)]
         phone: Option<String>,
-        #[arg(long)]
-        bank_name: Option<String>,
-        #[arg(long)]
-        bank_iban: Option<String>,
-        #[arg(long)]
-        bank_bic: Option<String>,
+        /// Bank / payment detail line as "Label: Value". Repeat for each
+        /// line. Example:
+        ///   --bank-line "Bank: DBS" --bank-line "Account: 1234567890"
+        ///   --bank-line "Bank Code: 7171" --bank-line "SWIFT: DBSSSGSG"
+        /// Lines render as a two-column list on the invoice PDF.
+        #[arg(long = "bank-line")]
+        bank_line: Vec<String>,
         #[arg(long, default_value = "vienna")]
         template: String,
         /// Path to a logo image (PNG/SVG/JPG). Rendered in template header.
@@ -117,12 +118,14 @@ pub enum IssuerCmd {
         email: Option<String>,
         #[arg(long)]
         phone: Option<String>,
+        /// Bank / payment detail line as "Label: Value". Repeat for each
+        /// line. When any --bank-line is passed, REPLACES all existing
+        /// bank details on the issuer.
+        #[arg(long = "bank-line")]
+        bank_line: Vec<String>,
+        /// Remove all bank details from the issuer.
         #[arg(long)]
-        bank_name: Option<String>,
-        #[arg(long)]
-        bank_iban: Option<String>,
-        #[arg(long)]
-        bank_bic: Option<String>,
+        bank_clear: bool,
         #[arg(long)]
         template: Option<String>,
         #[arg(long)]

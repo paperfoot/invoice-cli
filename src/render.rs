@@ -46,16 +46,16 @@ pub struct IssuerData {
     pub phone: Option<String>,
     pub tax_id: Option<String>,
     pub company_no: Option<String>,
-    pub bank: Option<BankData>,
+    pub bank: Option<BankBlock>,
     /// Typst-resolvable logo path (relative to --root). None when no logo.
     pub logo: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct BankData {
-    pub name: String,
-    pub iban: String,
-    pub bic: String,
+pub struct BankBlock {
+    /// Parsed Label/Value rows from Issuer::bank_details. Each line is
+    /// rendered as one row in the two-column payment block on the PDF.
+    pub lines: Vec<finance_core::entity::BankLine>,
 }
 
 #[derive(Debug, Serialize)]
@@ -220,12 +220,13 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
             phone: issuer.phone.clone(),
             tax_id: issuer.tax_id.clone(),
             company_no: issuer.company_no.clone(),
-            bank: issuer.bank_name.as_ref().and_then(|n| {
-                Some(BankData {
-                    name: n.clone(),
-                    iban: issuer.bank_iban.clone()?,
-                    bic: issuer.bank_bic.clone()?,
-                })
+            bank: issuer.bank_details.as_deref().and_then(|details| {
+                let lines = finance_core::entity::BankLine::parse_all(details);
+                if lines.is_empty() {
+                    None
+                } else {
+                    Some(BankBlock { lines })
+                }
             }),
             logo: None, // populated below by resolve_logo when rendering
         },
@@ -523,12 +524,26 @@ fn typst_array(lines: &[String]) -> String {
 
 fn typst_dict_issuer(i: &IssuerData) -> String {
     let bank = match &i.bank {
-        Some(b) => format!(
-            "(name: {}, iban: {}, bic: {})",
-            typst_string(&b.name),
-            typst_string(&b.iban),
-            typst_string(&b.bic)
-        ),
+        Some(b) => {
+            let line_dicts: Vec<String> = b
+                .lines
+                .iter()
+                .map(|l| {
+                    format!(
+                        "(label: {}, value: {})",
+                        typst_string(&l.label),
+                        typst_string(&l.value)
+                    )
+                })
+                .collect();
+            // Trailing comma so single-line is treated as 1-array not string.
+            let lines_array = if line_dicts.is_empty() {
+                "()".into()
+            } else {
+                format!("({},)", line_dicts.join(", "))
+            };
+            format!("(lines: {lines_array})")
+        }
         None => "none".into(),
     };
     format!(

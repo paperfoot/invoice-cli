@@ -506,17 +506,35 @@
 }
 
 // ─── Payment block ────────────────────────────────────────────────────────
+// Renders bank / payment details as a two-column list. Input: `bank` dict
+// with a `lines` array of `{label, value}` rows (from finance-core's
+// BankLine::parse_all). Handles every country — SG bank code, UK sort code,
+// US ABA routing, EU IBAN, AU BSB — because the caller decides the labels.
+// If `bank` is none (issuer has no bank_details set) the block renders
+// nothing, letting the template lay out without a crash.
 #let payment-block(bank, theme, label-text: "Pay to") = {
+  if bank == none { return }
   let mute = th(theme, "mute", rgb("#666"))
   let mono = th(theme, "mono-font", ("Menlo",))
-  let display = th(theme, "display-font", ("Inter",))
   lbl(theme, label-text)
   v(sp.s)
-  text(font: display, size: 9.5pt, weight: 600)[#bank.name]
-  linebreak()
-  text(size: 9.5pt, font: mono)[#bank.iban]
-  linebreak()
-  text(size: 9.5pt, font: mono, fill: mute)[BIC  #bank.bic]
+  let cells = ()
+  for line in bank.lines {
+    if line.label != "" {
+      cells.push(text(size: 7.5pt, fill: mute, tracking: 0.08em)[#upper(line.label)])
+      cells.push(text(size: 9.5pt, font: mono)[#line.value])
+    } else {
+      // Continuation line without a label — span both columns.
+      cells.push([])
+      cells.push(text(size: 9.5pt, font: mono, fill: mute)[#line.value])
+    }
+  }
+  grid(
+    columns: (auto, 1fr),
+    column-gutter: 0.8em,
+    row-gutter: 0.25em,
+    ..cells,
+  )
 }
 
 #let notes-block(text-body, theme, label-text: "Notes") = {

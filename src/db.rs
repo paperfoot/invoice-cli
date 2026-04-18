@@ -135,9 +135,9 @@ pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
     conn.execute(
         "INSERT INTO issuers (slug, name, legal_name, jurisdiction, tax_registered,
                               tax_id, company_no, tagline, address, email, phone,
-                              bank_name, bank_iban, bank_bic, default_template,
+                              bank_details, default_template,
                               currency, symbol, number_format, logo_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             issuer.slug,
             issuer.name,
@@ -150,9 +150,7 @@ pub fn issuer_create(conn: &Connection, issuer: &Issuer) -> Result<i64> {
             addr_to_text(&issuer.address),
             issuer.email,
             issuer.phone,
-            issuer.bank_name,
-            issuer.bank_iban,
-            issuer.bank_bic,
+            issuer.bank_details,
             issuer.default_template,
             issuer.currency,
             issuer.symbol,
@@ -167,7 +165,7 @@ pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
     let mut stmt = conn.prepare(
         "SELECT id, slug, name, legal_name, jurisdiction, tax_registered,
                 tax_id, company_no, tagline, address, email, phone,
-                bank_name, bank_iban, bank_bic, default_template,
+                bank_details, default_template,
                 currency, symbol, number_format, logo_path
          FROM issuers ORDER BY slug",
     )?;
@@ -187,14 +185,12 @@ pub fn issuer_list(conn: &Connection) -> Result<Vec<Issuer>> {
                 address: text_to_addr(&row.get::<_, String>(9)?),
                 email: row.get(10)?,
                 phone: row.get(11)?,
-                bank_name: row.get(12)?,
-                bank_iban: row.get(13)?,
-                bank_bic: row.get(14)?,
-                default_template: row.get(15)?,
-                currency: row.get(16)?,
-                symbol: row.get(17)?,
-                number_format: row.get(18)?,
-                logo_path: row.get(19)?,
+                bank_details: row.get(12)?,
+                default_template: row.get(13)?,
+                currency: row.get(14)?,
+                symbol: row.get(15)?,
+                number_format: row.get(16)?,
+                logo_path: row.get(17)?,
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -242,10 +238,9 @@ pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
         "UPDATE issuers SET
              name = ?1, legal_name = ?2, jurisdiction = ?3, tax_registered = ?4,
              tax_id = ?5, company_no = ?6, tagline = ?7, address = ?8,
-             email = ?9, phone = ?10, bank_name = ?11, bank_iban = ?12,
-             bank_bic = ?13, default_template = ?14, currency = ?15,
-             symbol = ?16, number_format = ?17, logo_path = ?18
-         WHERE slug = ?19",
+             email = ?9, phone = ?10, bank_details = ?11, default_template = ?12,
+             currency = ?13, symbol = ?14, number_format = ?15, logo_path = ?16
+         WHERE slug = ?17",
         params![
             issuer.name,
             issuer.legal_name,
@@ -257,9 +252,7 @@ pub fn issuer_update(conn: &Connection, issuer: &Issuer) -> Result<()> {
             addr_to_text(&issuer.address),
             issuer.email,
             issuer.phone,
-            issuer.bank_name,
-            issuer.bank_iban,
-            issuer.bank_bic,
+            issuer.bank_details,
             issuer.default_template,
             issuer.currency,
             issuer.symbol,
