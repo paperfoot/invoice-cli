@@ -197,7 +197,7 @@
 
 #if "qr" in d and d.qr != none {
   grid(
-    columns: (1fr, 1.3fr, auto),
+    columns: (1fr, 1fr, auto),
     column-gutter: 10mm,
     payment-block(d.issuer.bank, theme),
     notes-block(d.notes, theme),
@@ -209,7 +209,7 @@
   )
 } else {
   grid(
-    columns: (1fr, 1.3fr),
+    columns: (1fr, 1fr),
     column-gutter: 10mm,
     payment-block(d.issuer.bank, theme),
     notes-block(d.notes, theme),

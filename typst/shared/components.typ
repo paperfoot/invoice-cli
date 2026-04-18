@@ -527,12 +527,12 @@
   let cells = ()
   for line in bank.lines {
     if line.label != "" {
-      cells.push(text(size: 9.5pt, fill: mute)[#line.label])
-      cells.push(text(size: 9.5pt, font: mono)[#line.value])
+      cells.push(text(size: 8.5pt, fill: mute)[#line.label])
+      cells.push(text(size: 8.5pt, font: mono)[#line.value])
     } else {
       // Continuation line without a label — span both columns visually.
       cells.push([])
-      cells.push(text(size: 9.5pt, font: mono, fill: mute)[#line.value])
+      cells.push(text(size: 8.5pt, font: mono, fill: mute)[#line.value])
     }
   }
   grid(
@@ -547,7 +547,7 @@
   let mute = th(theme, "mute", rgb("#666"))
   lbl(theme, label-text)
   v(sp.s)
-  text(size: 9.5pt, fill: mute)[#text-body]
+  text(size: 8.5pt, fill: mute)[#text-body]
 }
 
 // ─── DIN 5008 fold marks ─────────────────────────────────────────────────
