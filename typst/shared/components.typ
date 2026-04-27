@@ -57,11 +57,11 @@
   let f = if fill == none { th(theme, "mute", rgb("#666")) } else { fill }
   if style == "smallcaps" {
     text(
-      font: th(theme, "display-font", ("Inter",)),
+      font: th(theme, "display-font", ("Helvetica Neue", "Helvetica", "Arial", "New Computer Modern")),
       size: size + 0.3pt, tracking: tracking + 0.2pt, fill: f, weight: weight,
     )[#upper(txt)]
   } else if style == "mono-tag" {
-    text(font: th(theme, "mono-font", ("Menlo",)), size: size - 0.5pt, tracking: tracking - 0.3pt, fill: f, weight: weight)[#upper(txt)]
+    text(font: th(theme, "mono-font", ("Menlo", "DejaVu Sans Mono")), size: size - 0.5pt, tracking: tracking - 0.3pt, fill: f, weight: weight)[#upper(txt)]
   } else {
     text(size: size, tracking: tracking, fill: f, weight: weight)[#upper(txt)]
   }
@@ -78,7 +78,7 @@
 // never from size. Size only varies for headings and labels, nowhere else.
 #let party-block(party, theme, label-text: "To", show-name: true) = {
   let mute = th(theme, "mute", rgb("#666"))
-  let display = th(theme, "display-font", ("Inter",))
+  let display = th(theme, "display-font", ("Helvetica Neue", "Helvetica", "Arial", "New Computer Modern"))
   let has(k) = k in party and party.at(k) != none
   lbl(theme, label-text)
   v(sp.s)
@@ -140,7 +140,7 @@
   let mute = th(theme, "mute", rgb("#666"))
   let hair = th(theme, "hair", rgb("#e0e0e0"))
   let accent = th(theme, "accent", rgb("#333"))
-  let display = th(theme, "display-font", ("Inter",))
+  let display = th(theme, "display-font", ("Helvetica Neue", "Helvetica", "Arial", "New Computer Modern"))
   let zero-style = th(theme, "tax-zero", "dash")
 
   let fmt-qty(q) = if calc.rem(q, 1) == 0 { str(int(q)) } else { str(q) }
@@ -221,7 +221,7 @@
   let paper   = th(theme, "paper", white)
   let accent-soft = th(theme, "accent-soft", rgb("#f2f2f2"))
   let dim     = th(theme, "dim", rgb("#ccc"))
-  let display = th(theme, "display-font", ("Inter",))
+  let display = th(theme, "display-font", ("Helvetica Neue", "Helvetica", "Arial", "New Computer Modern"))
 
   // Tax-row labels (Subtotal / GST @ 9% / …) match body size (9.5pt) so the
   // rhythm across the doc reads as one voice; colour alone distinguishes
@@ -295,7 +295,7 @@
           column-gutter: sp.m,
           align: (left + horizon, right + horizon),
           lbl(theme, total-label-text("Total due") + " →", fill: ink, size: 9pt),
-          _fit-total(money(totals.total, symbol: currency-symbol), th(theme, "mono-font", ("Menlo",)), 600, width - 36mm, accent: accent),
+          _fit-total(money(totals.total, symbol: currency-symbol), th(theme, "mono-font", ("Menlo", "DejaVu Sans Mono")), 600, width - 36mm, accent: accent),
         )
       ]
     ]
@@ -524,7 +524,7 @@
 #let payment-block(bank, theme, label-text: "Pay to") = {
   if bank == none { return }
   let mute = th(theme, "mute", rgb("#666"))
-  let mono = th(theme, "mono-font", ("Menlo",))
+  let mono = th(theme, "mono-font", ("Menlo", "DejaVu Sans Mono"))
   lbl(theme, label-text)
   v(sp.s)
   let cells = ()

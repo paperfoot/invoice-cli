@@ -16,7 +16,7 @@
   mute: rgb("#74695E"),
   hair: rgb("#D9CFB8"),
   dim: rgb("#C7BFAE"),
-  display-font: ("Playfair Display", "Didot", "Georgia"),
+  display-font: ("Didot", "Georgia", "Libertinus Serif"),
   body-font: ("Adobe Garamond Pro", "Iowan Old Style", "Baskerville", "Georgia"),
   mono-font: ("Menlo", "DejaVu Sans Mono"),
   label-style: "smallcaps",
