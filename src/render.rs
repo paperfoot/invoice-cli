@@ -32,8 +32,8 @@ pub struct InvoiceData {
 #[derive(Debug, Serialize)]
 pub struct QrData {
     pub modules: Vec<Vec<bool>>,
-    pub size: u32,      // module count per side
-    pub label: String,  // shown below the code ("Pay online", "Scan to pay", etc.)
+    pub size: u32,     // module count per side
+    pub label: String, // shown below the code ("Pay online", "Scan to pay", etc.)
 }
 
 #[derive(Debug, Serialize)]
@@ -135,12 +135,8 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
 
     for it in &inv.items {
         let gross = line_total(it.qty, it.unit_price);
-        let line = line_total_discounted(
-            it.qty,
-            it.unit_price,
-            it.discount_rate,
-            it.discount_fixed,
-        );
+        let line =
+            line_total_discounted(it.qty, it.unit_price, it.discount_rate, it.discount_fixed);
         let (disc_amt, disc_label) = if gross.0 != line.0 {
             let diff = MinorUnits(gross.0 - line.0);
             let label = if let Some(r) = it.discount_rate {
@@ -166,7 +162,11 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
             unit_price: it.unit_price.as_major(),
             tax_rate: it.tax_rate.to_f64().unwrap_or(0.0),
             amount: line.as_major(),
-            gross: if disc_amt.is_some() { Some(gross.as_major()) } else { None },
+            gross: if disc_amt.is_some() {
+                Some(gross.as_major())
+            } else {
+                None
+            },
             discount: disc_amt,
             discount_label: disc_label,
         });
@@ -193,8 +193,8 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
         let rate = Decimal::from_str(rate_str).unwrap_or_default();
         let scaled_base = if subtotal.0 > 0 && inv_discount_minor > 0 {
             MinorUnits(
-                ((base.0 as i128) * (subtotal_after_discount.0 as i128)
-                    / (subtotal.0 as i128)) as i64,
+                ((base.0 as i128) * (subtotal_after_discount.0 as i128) / (subtotal.0 as i128))
+                    as i64,
             )
         } else {
             *base
@@ -246,7 +246,11 @@ pub fn build_data(inv: &Invoice, issuer: &Issuer, client: &Client) -> InvoiceDat
             tax_label: inv.tax_label.clone(),
             title,
             reverse_charge: inv.reverse_charge,
-            kind: if inv.kind == "credit_note" { "credit-note".into() } else { "invoice".into() },
+            kind: if inv.kind == "credit_note" {
+                "credit-note".into()
+            } else {
+                "invoice".into()
+            },
             credits_number: None, // populated below
         },
         items,
@@ -274,22 +278,14 @@ pub fn encode_qr(data: &str) -> Option<QrData> {
     if data.is_empty() {
         return None;
     }
-    let code = qrcode::QrCode::with_error_correction_level(
-        data.as_bytes(),
-        qrcode::EcLevel::Q,
-    )
-    .ok()?;
+    let code =
+        qrcode::QrCode::with_error_correction_level(data.as_bytes(), qrcode::EcLevel::Q).ok()?;
     let width = code.width();
     let colors = code.to_colors();
     let modules: Vec<Vec<bool>> = (0..width)
         .map(|row| {
             (0..width)
-                .map(|col| {
-                    matches!(
-                        colors[row * width + col],
-                        qrcode::Color::Dark
-                    )
-                })
+                .map(|col| matches!(colors[row * width + col], qrcode::Color::Dark))
                 .collect()
         })
         .collect();
@@ -354,15 +350,14 @@ pub fn render_invoice_with_qr(
             }
         }
     }
-    inject_sample_data(&data)?;
-
-    let template_path = typst_assets::template_path(template)?;
-    let root = typst_assets::project_root()?;
+    let render_root = prepare_render_root(&data)?;
+    let root = render_root.path();
+    let template_path = root.join("templates").join(format!("{template}.typ"));
 
     let status = Command::new("typst")
         .arg("compile")
         .arg("--root")
-        .arg(&root)
+        .arg(root)
         .arg(&template_path)
         .arg(out_path)
         .status()
@@ -378,6 +373,31 @@ pub fn render_invoice_with_qr(
     Ok(())
 }
 
+fn prepare_render_root(data: &InvoiceData) -> Result<tempfile::TempDir> {
+    let source_root = typst_assets::project_root()?;
+    let render_root = tempfile::Builder::new()
+        .prefix("invoice-cli-render-")
+        .tempdir()?;
+    copy_dir_contents(&source_root, render_root.path())?;
+    inject_sample_data(render_root.path(), data)?;
+    Ok(render_root)
+}
+
+fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_contents(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
+}
+
 /// Copy the issuer's logo file into `<assets>/shared/logo-<slug>.<ext>` so
 /// Typst can reference it (Typst is sandboxed to --root). Returns the
 /// root-relative path, or None if no logo is configured / the file doesn't
@@ -390,7 +410,11 @@ fn resolve_logo(issuer: &Issuer) -> Result<Option<String>> {
     let src = Path::new(&src_expanded);
     if !src.exists() {
         // Configured but missing — warn by rendering without, don't hard-fail
-        eprintln!("warning: logo '{}' not found for issuer '{}' — rendering without", src.display(), issuer.slug);
+        eprintln!(
+            "warning: logo '{}' not found for issuer '{}' — rendering without",
+            src.display(),
+            issuer.slug
+        );
         return Ok(None);
     }
     let ext = src
@@ -429,11 +453,13 @@ pub fn expand_tilde(s: &str) -> String {
 /// (falls back to `~/Documents/Invoices/`).
 pub fn default_invoice_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join("Documents").join("Invoices")
+    std::path::PathBuf::from(home)
+        .join("Documents")
+        .join("Invoices")
 }
 
-fn inject_sample_data(data: &InvoiceData) -> Result<()> {
-    let shared = typst_assets::shared_dir()?;
+fn inject_sample_data(root: &Path, data: &InvoiceData) -> Result<()> {
+    let shared = root.join("shared");
     let invoice_path = shared.join("invoice.typ");
     let helpers_path = shared.join("_helpers.inc.typ");
     let helpers = std::fs::read_to_string(&helpers_path)
@@ -465,7 +491,12 @@ fn typst_dict_totals(t: &TotalsData) -> String {
     let tax_lines: Vec<String> = t
         .tax_lines
         .iter()
-        .map(|tl| format!("(rate: {}, base: {}, amount: {})", tl.rate, tl.base, tl.amount))
+        .map(|tl| {
+            format!(
+                "(rate: {}, base: {}, amount: {})",
+                tl.rate, tl.base, tl.amount
+            )
+        })
         .collect();
     let tax_lines_str = if tax_lines.is_empty() {
         "()".to_string()
@@ -478,7 +509,9 @@ fn typst_dict_totals(t: &TotalsData) -> String {
         tax_lines_str,
         t.tax_total,
         t.total,
-        t.discount.map(|v| v.to_string()).unwrap_or_else(|| "none".into()),
+        t.discount
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "none".into()),
         typst_opt(&t.discount_label),
     )
 }

@@ -66,7 +66,7 @@
             90mm,
             s => text(font: theme.display-font, size: s, weight: 500, tracking: 1pt)[#upper(d.issuer.name)],
           )
-          #if "legal-name" in d.issuer and d.issuer.legal-name != none [
+          #if "legal-name" in d.issuer and d.issuer.legal-name != none and d.issuer.legal-name != d.issuer.name [
             \
             #v(-1pt)
             #text(size: 8.5pt, tracking: 0.2pt)[#d.issuer.legal-name]
@@ -96,7 +96,7 @@
   columns: (1fr, 1fr),
   column-gutter: 14mm,
   party-block(d.client, theme, label-text: "Bill to"),
-  party-block(d.issuer, theme, label-text: "Bill from"),
+  party-block(d.issuer, theme, label-text: "Bill from", show-name: false),
 )
 
 #v(mm-sp.s)
@@ -159,7 +159,7 @@
     #v(sp.m)
     #text(font: serif, size: 11pt, style: "italic", fill: theme.accent)[With thanks — #d.issuer.name.]
   ],
-  tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 90mm, tax-label: d.invoice.tax-label),
+  tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 90mm, tax-label: d.invoice.tax-label, total-label: if d.invoice.kind == "credit-note" { "Total credit" } else { none }),
 )
 
 // Invoice-level discount row — sits under the soft-fill totals card.
@@ -190,13 +190,14 @@
 #v(mm-sp.m)
 #line(length: 100%, stroke: 0.3pt + theme.hair)
 #v(mm-sp.s)
+#let payment-label = if d.invoice.kind == "credit-note" { "Payment details" } else { "Pay to" }
 
 #block(breakable: false)[
   #if "qr" in d and d.qr != none {
     grid(
       columns: (1fr, 1fr, auto),
       column-gutter: 8mm,
-      payment-block(d.issuer.bank, theme, label-text: "Pay to"),
+      payment-block(d.issuer.bank, theme, label-text: payment-label),
       notes-block(d.notes, theme, label-text: "Notes"),
       [
         #qr-render(d.qr.modules, size: 24mm, fg: theme.accent, bg: theme.accent-soft, style: theme.qr-style)
@@ -208,7 +209,7 @@
     grid(
       columns: (1fr, 1fr),
       column-gutter: 10mm,
-      payment-block(d.issuer.bank, theme, label-text: "Pay to"),
+      payment-block(d.issuer.bank, theme, label-text: payment-label),
       notes-block(d.notes, theme, label-text: "Notes"),
     )
   }

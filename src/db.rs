@@ -440,7 +440,11 @@ pub fn product_by_slug(conn: &Connection, slug: &str) -> Result<Product> {
         1 => Ok(matches.into_iter().next().unwrap()),
         _ => Err(AppError::Ambiguous(format!(
             "product '{slug}' matches {}",
-            matches.iter().map(|m| m.slug.as_str()).collect::<Vec<_>>().join(", ")
+            matches
+                .iter()
+                .map(|m| m.slug.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ))),
     }
 }
@@ -506,17 +510,26 @@ pub fn next_invoice_number(
 
     let mut out = issuer.number_format.clone();
     out = out.replace("{year}", &year.to_string());
-    if out.contains("{seq:04}") {
-        out = out.replace("{seq:04}", &format!("{:04}", seq));
-    } else if out.contains("{seq:05}") {
-        out = out.replace("{seq:05}", &format!("{:05}", seq));
-    } else {
-        out = out.replace("{seq}", &seq.to_string());
-    }
+    out = apply_sequence_format(&out, seq);
     if kind == "credit_note" {
         out = format!("CN-{out}");
     }
     Ok(out)
+}
+
+fn apply_sequence_format(format: &str, seq: i64) -> String {
+    if let Some(start) = format.find("{seq:") {
+        let width_start = start + "{seq:".len();
+        if let Some(relative_end) = format[width_start..].find('}') {
+            let end = width_start + relative_end;
+            if let Ok(width) = format[width_start..end].parse::<usize>() {
+                let token = &format[start..=end];
+                return format.replace(token, &format!("{:0width$}", seq, width = width));
+            }
+        }
+    }
+
+    format.replace("{seq}", &seq.to_string())
 }
 
 pub fn invoice_create(conn: &mut Connection, inv: &Invoice) -> Result<i64> {
@@ -699,8 +712,9 @@ pub fn invoice_list(
         )?
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
-    // Populate `total_minor` per invoice. Discount-aware: uses
-    // `line_total_discounted` (see money.rs) so listings match the PDF.
+    // Populate `total_minor` per invoice. Discount-aware and tax-aware:
+    // keep the same proportional invoice-level discount math used by the
+    // renderer so `invoices list` and PDFs agree.
     if !rows.is_empty() {
         use crate::money::{line_total_discounted, tax_amount, MinorUnits};
         let mut items_stmt = conn.prepare(
@@ -712,7 +726,7 @@ pub fn invoice_list(
         #[derive(Default)]
         struct Acc {
             subtotal: i64,
-            tax: i64,
+            by_rate: std::collections::BTreeMap<String, i64>,
         }
         let mut acc: std::collections::HashMap<i64, Acc> = std::collections::HashMap::new();
         let item_rows = items_stmt.query_map([], |row| {
@@ -732,30 +746,61 @@ pub fn invoice_list(
             let dr = disc_rate.and_then(|s| Decimal::from_str(&s).ok());
             let df = disc_fixed.map(MinorUnits);
             let line = line_total_discounted(qty, MinorUnits(up_minor), dr, df);
-            let tax = tax_amount(line, rate);
             let e = acc.entry(iid).or_default();
             e.subtotal += line.0;
-            e.tax += tax.0;
+            *e.by_rate.entry(rate.to_string()).or_insert(0) += line.0;
         }
         for inv in rows.iter_mut() {
             if let Some(a) = acc.get(&inv.id) {
-                // Apply invoice-level discount to pre-tax subtotal. Recompute
-                // tax proportionally — approximation (tax already computed
-                // per-line); acceptable for listing totals where PDFs rely on
-                // the per-line numbers anyway.
-                let mut sub = a.subtotal;
-                if let Some(rate) = &inv.discount_rate {
-                    let cut = crate::money::apply_rate(MinorUnits(sub), *rate);
-                    sub -= cut.0;
-                }
-                if let Some(fx) = &inv.discount_fixed {
-                    sub -= fx.0;
-                }
-                inv.total_minor = Some(sub + a.tax);
+                let discount =
+                    invoice_discount_minor(a.subtotal, inv.discount_rate, inv.discount_fixed);
+                inv.total_minor = Some(total_minor_from_bases(
+                    a.subtotal,
+                    &a.by_rate,
+                    discount,
+                    |base, rate| tax_amount(MinorUnits(base), rate).0,
+                ));
             }
         }
     }
     Ok(rows)
+}
+
+fn invoice_discount_minor(
+    subtotal: i64,
+    discount_rate: Option<Decimal>,
+    discount_fixed: Option<MinorUnits>,
+) -> i64 {
+    match (discount_rate, discount_fixed) {
+        (Some(rate), _) => crate::money::apply_rate(MinorUnits(subtotal), rate)
+            .0
+            .clamp(0, subtotal),
+        (None, Some(fixed)) => fixed.0.clamp(0, subtotal),
+        _ => 0,
+    }
+}
+
+fn total_minor_from_bases<F>(
+    subtotal: i64,
+    by_rate: &std::collections::BTreeMap<String, i64>,
+    discount: i64,
+    tax_fn: F,
+) -> i64
+where
+    F: Fn(i64, Decimal) -> i64,
+{
+    let subtotal_after_discount = subtotal - discount;
+    let mut tax_total = 0;
+    for (rate_str, base) in by_rate {
+        let rate = Decimal::from_str(rate_str).unwrap_or_default();
+        let scaled_base = if subtotal > 0 && discount > 0 {
+            ((*base as i128) * (subtotal_after_discount as i128) / (subtotal as i128)) as i64
+        } else {
+            *base
+        };
+        tax_total += tax_fn(scaled_base, rate);
+    }
+    subtotal_after_discount + tax_total
 }
 
 /// Update status and, on first transition into `issued` / `paid`, stamp the
@@ -820,8 +865,7 @@ pub fn invoice_update_draft(conn: &Connection, inv: &Invoice) -> Result<()> {
             |r| r.get(0),
         )
         .optional()?;
-    let status =
-        status.ok_or_else(|| AppError::NotFound(format!("invoice '{}'", inv.number)))?;
+    let status = status.ok_or_else(|| AppError::NotFound(format!("invoice '{}'", inv.number)))?;
     if status != "draft" {
         return Err(AppError::InvalidInput(format!(
             "invoice '{}' is {status}, not draft — issued invoices are immutable. Use a credit note to correct.",
@@ -957,4 +1001,34 @@ pub fn invoice_item_edit(
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_sequence_format, invoice_discount_minor, total_minor_from_bases};
+    use crate::money::MinorUnits;
+    use rust_decimal::Decimal;
+    use std::collections::BTreeMap;
+    use std::str::FromStr;
+
+    #[test]
+    fn applies_variable_width_sequence_tokens() {
+        assert_eq!(
+            apply_sequence_format("199-AP-{year}-{seq:03}", 2),
+            "199-AP-{year}-002"
+        );
+        assert_eq!(apply_sequence_format("{year}-{seq:04}", 42), "{year}-0042");
+        assert_eq!(apply_sequence_format("{year}-{seq}", 7), "{year}-7");
+    }
+
+    #[test]
+    fn list_total_scales_tax_base_after_invoice_discount() {
+        let mut bases = BTreeMap::new();
+        bases.insert("20".to_string(), 10_000);
+        let discount = invoice_discount_minor(10_000, Some(Decimal::from_str("50").unwrap()), None);
+        let total = total_minor_from_bases(10_000, &bases, discount, |base, rate| {
+            crate::money::tax_amount(MinorUnits(base), rate).0
+        });
+        assert_eq!(total, 6_000);
+    }
 }

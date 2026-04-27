@@ -50,11 +50,7 @@ pub fn run(ctx: Ctx) -> Result<()> {
     checks.push(Check {
         name: "config".into(),
         status: "pass",
-        message: format!(
-            "{} (exists: {})",
-            cfg_path.display(),
-            cfg_path.exists()
-        ),
+        message: format!("{} (exists: {})", cfg_path.display(), cfg_path.exists()),
     });
 
     // state dir

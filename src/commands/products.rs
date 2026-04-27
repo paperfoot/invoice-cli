@@ -36,7 +36,9 @@ pub fn run(cmd: ProductCmd, ctx: Ctx) -> Result<()> {
             let id = db::product_create(&conn, &product)?;
             let mut out = product.clone();
             out.id = id;
-            print_success(ctx, &out, |p| println!("added product '{}' (id {})", p.slug, p.id));
+            print_success(ctx, &out, |p| {
+                println!("added product '{}' (id {})", p.slug, p.id)
+            });
             Ok(())
         }
         ProductCmd::List => {

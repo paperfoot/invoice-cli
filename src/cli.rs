@@ -158,10 +158,7 @@ pub enum IssuerCmd {
         notes: Option<String>,
     },
     /// Shorthand: change the issuer's default template
-    SetTemplate {
-        slug: String,
-        template: String,
-    },
+    SetTemplate { slug: String, template: String },
     #[command(alias = "ls")]
     List,
     #[command(alias = "get")]
@@ -219,15 +216,9 @@ pub enum ClientCmd {
         default_template: Option<String>,
     },
     /// Shorthand: pin a default issuer for this client
-    SetIssuer {
-        slug: String,
-        issuer_slug: String,
-    },
+    SetIssuer { slug: String, issuer_slug: String },
     /// Shorthand: pin a preferred template for this client
-    SetTemplate {
-        slug: String,
-        template: String,
-    },
+    SetTemplate { slug: String, template: String },
     #[command(alias = "ls")]
     List,
     #[command(alias = "get")]
@@ -282,7 +273,6 @@ pub enum ProductCmd {
 #[derive(Subcommand, Debug)]
 pub enum InvoiceCmd {
     /// Create a new invoice
-    #[command(alias = "new")]
     New {
         /// Issuer slug (the "as" — whose invoice is this?). Optional if the
         /// client has a `default_issuer` pinned.
@@ -349,12 +339,13 @@ pub enum InvoiceCmd {
     CreditNote {
         /// Source invoice number
         number: String,
-        /// Copy ALL line items from source with positive qty — represents a
-        /// full reversal. Mutually exclusive with --item.
+        /// Copy ALL line items from source and reverse their quantities.
+        /// Mutually exclusive with --item.
         #[arg(long, conflicts_with = "items")]
         full: bool,
         /// Explicit items to include on the credit note (same format as
-        /// `invoices new --item`). Amounts should reflect the refund value.
+        /// `invoices new --item`). Positive refund amounts are stored as
+        /// credits automatically.
         #[arg(long = "item")]
         items: Vec<String>,
         #[arg(long)]
@@ -424,10 +415,7 @@ pub enum InvoiceCmd {
         open: bool,
     },
     /// Mark status (draft/issued/paid/void)
-    Mark {
-        number: String,
-        status: String,
-    },
+    Mark { number: String, status: String },
     #[command(alias = "rm")]
     Delete {
         number: String,

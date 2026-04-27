@@ -19,7 +19,7 @@ description: >
 ### Quick start
 
 ```
-invoice issuer add acme --name "Acme Studio" --jurisdiction sg --tax-registered --tax-id "GST M2-..." --address "..."
+invoice issuer add acme --name "Acme Studio" --jurisdiction sg --tax-registered --tax-id "GST M2-..." --address "1 Marina Bay\nSingapore" --bank-line "Bank: DBS" --bank-line "Account: 1234567890"
 invoice clients add meridian --name "Meridian & Co." --country US --address "..." \
     --default-issuer acme --default-template boutique
 invoice products add design --description "Design engagement" --unit project --price 8400 --currency SGD --tax-rate 9
@@ -32,7 +32,7 @@ invoice invoices duplicate 2026-0001                              # clone for ne
 ### Editing existing records
 
 ```
-invoice issuer edit acme --phone "+65 ..." --bank-iban "SG..."
+invoice issuer edit acme --phone "+65 ..." --bank-line "Bank: DBS" --bank-line "Account: 1234567890"
 invoice clients edit meridian --default-template tiefletter-gold
 invoice products edit design --price 9200
 invoice issuer set-template acme boutique    # shorthand for --template
@@ -53,8 +53,8 @@ DRAFT invoices are mutable; once `issued`/`paid`/`void` they're immutable — us
 
 ```
 invoice invoices edit 2026-0001 --notes "Net 14 — early-payment 2% discount"
-invoice invoices items 2026-0001 add "Extra fee:1:500"
-invoice invoices credit-note 2026-0001 --item "Refund:1:-500" --notes "Goodwill credit"
+invoice invoices items add 2026-0001 "Extra fee:1:500"
+invoice invoices credit-note 2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
 ```
 
 ### Aging & export
@@ -78,7 +78,7 @@ invoice invoices new --client meridian --item design --discount-rate 10
 - Run `invoice doctor` to verify typst is installed & DB is ready.
 - Item spec supports `product-slug[:qty]` OR `description:qty:price[:rate]`.
 - Template resolution at render: `--template` flag > client.default_template > issuer.default_template > `vienna`.
-- `--as` picks the issuer; omit it when the client has a `default_issuer` pinned.
+- `--as` picks the issuer; omit it when the client has `default_issuer` pinned or `config.default_issuer` is set.
 - `mark issued` / `mark paid` auto-stamp `issued_at` / `paid_at` (first transition only).
 - `invoices list` shows totals per invoice (computed with `rust_decimal`).
 - Every tax value is computed with `rust_decimal` — no float rounding.

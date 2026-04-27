@@ -29,11 +29,19 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             let client_row = db::client_by_slug(&conn, &client)?;
             let issuer_slug = match r#as {
                 Some(s) => s,
-                None => client_row.default_issuer_slug.clone().ok_or_else(|| {
-                    AppError::InvalidInput(
-                        "--as required (no default issuer on this client)".into(),
-                    )
-                })?,
+                None => client_row
+                    .default_issuer_slug
+                    .clone()
+                    .or_else(|| {
+                        crate::config::load()
+                            .ok()
+                            .and_then(|cfg| cfg.default_issuer)
+                    })
+                    .ok_or_else(|| {
+                        AppError::InvalidInput(
+                            "--as required (no default issuer on this client or in config)".into(),
+                        )
+                    })?,
             };
             let issuer = db::issuer_by_slug(&conn, &issuer_slug)?;
             let profile = issuer.jurisdiction.profile();
@@ -51,7 +59,10 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             // the invoice.
             let derived_symbol = finance_core::money::currency_symbol(&use_currency);
             let use_symbol = if issuer.currency.as_deref() == Some(use_currency.as_str()) {
-                issuer.symbol.clone().unwrap_or_else(|| derived_symbol.to_string())
+                issuer
+                    .symbol
+                    .clone()
+                    .unwrap_or_else(|| derived_symbol.to_string())
             } else if !derived_symbol.is_empty() {
                 derived_symbol.to_string()
             } else {
@@ -61,6 +72,11 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             // Notes fallback: if --notes not given, use the issuer's default.
             let use_notes = notes.or_else(|| issuer.default_notes.clone());
 
+            if items.is_empty() {
+                return Err(AppError::InvalidInput(
+                    "at least one --item is required to create an invoice".into(),
+                ));
+            }
             let parsed_items = parse_items(&conn, &items, &profile)?;
 
             let (inv_discount_rate, inv_discount_fixed) =
@@ -128,6 +144,10 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                 inv.notes = Some(n);
             }
             if let Some(c) = currency {
+                let derived_symbol = finance_core::money::currency_symbol(&c);
+                if !derived_symbol.is_empty() {
+                    inv.symbol = derived_symbol.to_string();
+                }
                 inv.currency = c;
             }
             if let Some(p) = pay_link {
@@ -182,7 +202,9 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                     })
                     .collect()
             } else if !items.is_empty() {
-                parse_items(&conn, &items, &profile)?
+                let mut parsed = parse_items(&conn, &items, &profile)?;
+                normalize_credit_note_items(&mut parsed);
+                parsed
             } else {
                 return Err(AppError::InvalidInput(
                     "pass --full or at least one --item".into(),
@@ -190,8 +212,7 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             };
 
             let today = chrono::Local::now().date_naive();
-            let new_number =
-                db::next_invoice_number(&conn, &issuer, today.year(), "credit_note")?;
+            let new_number = db::next_invoice_number(&conn, &issuer, today.year(), "credit_note")?;
 
             let invoice = Invoice {
                 id: 0,
@@ -238,8 +259,7 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                 count: i64,
                 total_minor: i64,
             }
-            let mut buckets: std::collections::BTreeMap<&'static str, Bucket> =
-                Default::default();
+            let mut buckets: std::collections::BTreeMap<&'static str, Bucket> = Default::default();
             for name in ["not_yet_due", "0_30", "31_60", "61_90", "90_plus"] {
                 buckets.insert(name, Bucket::default());
             }
@@ -254,8 +274,7 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             }
             let mut rows: Vec<Row> = Vec::new();
             for inv in &list {
-                let due = NaiveDate::parse_from_str(&inv.due_date, "%Y-%m-%d")
-                    .unwrap_or(today);
+                let due = NaiveDate::parse_from_str(&inv.due_date, "%Y-%m-%d").unwrap_or(today);
                 let days_overdue = (today - due).num_days();
                 let bucket_name: &'static str = if days_overdue <= 0 {
                     "not_yet_due"
@@ -292,10 +311,7 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             });
 
             print_success(ctx, &payload, |_| {
-                println!(
-                    "{:<14} {:>6} {:>14}",
-                    "bucket", "count", "total"
-                );
+                println!("{:<14} {:>6} {:>14}", "bucket", "count", "total");
                 for (name, b) in &buckets {
                     let total = MinorUnits(b.total_minor).format_with_symbol(&symbol);
                     println!("{:<14} {:>6} {:>14}", name, b.count, total);
@@ -315,17 +331,15 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             let from_date = from
                 .as_deref()
                 .map(|s| {
-                    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| {
-                        AppError::InvalidInput(format!("bad --from '{s}': {e}"))
-                    })
+                    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                        .map_err(|e| AppError::InvalidInput(format!("bad --from '{s}': {e}")))
                 })
                 .transpose()?;
             let to_date = to
                 .as_deref()
                 .map(|s| {
-                    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| {
-                        AppError::InvalidInput(format!("bad --to '{s}': {e}"))
-                    })
+                    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+                        .map_err(|e| AppError::InvalidInput(format!("bad --to '{s}': {e}")))
                 })
                 .transpose()?;
 
@@ -522,7 +536,11 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
             });
             Ok(())
         }
-        InvoiceCmd::List { status, issuer, overdue } => {
+        InvoiceCmd::List {
+            status,
+            issuer,
+            overdue,
+        } => {
             let mut list = db::invoice_list(&conn, status.as_deref(), issuer.as_deref())?;
             if overdue {
                 let today = chrono::Local::now().date_naive();
@@ -614,7 +632,14 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                 std::fs::create_dir_all(parent)?;
             }
 
-            render::render_invoice_with_qr(&tmpl, &inv, &issuer, &client, inv.pay_link.as_deref(), &out_path)?;
+            render::render_invoice_with_qr(
+                &tmpl,
+                &inv,
+                &issuer,
+                &client,
+                inv.pay_link.as_deref(),
+                &out_path,
+            )?;
 
             // Immutable archive: always also write a byte-identical copy to
             // <data_dir>/rendered/<year>/<invoice-number>.pdf. The issue-event
@@ -632,7 +657,9 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                 #[cfg(target_os = "macos")]
                 let _ = std::process::Command::new("open").arg(&out_path).status();
                 #[cfg(target_os = "linux")]
-                let _ = std::process::Command::new("xdg-open").arg(&out_path).status();
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(&out_path)
+                    .status();
             }
 
             print_success(
@@ -656,9 +683,11 @@ pub fn run(cmd: InvoiceCmd, ctx: Ctx) -> Result<()> {
                 )));
             }
             db::invoice_set_status(&conn, &number, &status)?;
-            print_success(ctx, &serde_json::json!({"number": number, "status": status}), |v| {
-                println!("marked {} as {}", v["number"], v["status"])
-            });
+            print_success(
+                ctx,
+                &serde_json::json!({"number": number, "status": status}),
+                |v| println!("marked {} as {}", v["number"], v["status"]),
+            );
             Ok(())
         }
         InvoiceCmd::Delete { number, force } => {
@@ -704,12 +733,7 @@ fn run_items(cmd: InvoiceItemCmd, ctx: Ctx, conn: &mut rusqlite::Connection) -> 
                     "invoice": inv.number,
                     "item_id": item_id,
                 }),
-                |v| {
-                    println!(
-                        "added item to {} (item id {})",
-                        v["invoice"], v["item_id"]
-                    )
-                },
+                |v| println!("added item to {} (item id {})", v["invoice"], v["item_id"]),
             );
             Ok(())
         }
@@ -801,11 +825,21 @@ fn parse_discount_pair(
         (Some(r), None) => {
             let d = Decimal::from_str(r)
                 .map_err(|e| AppError::InvalidInput(format!("bad discount rate: {e}")))?;
+            if d < Decimal::ZERO || d > Decimal::from(100) {
+                return Err(AppError::InvalidInput(
+                    "discount rate must be between 0 and 100".into(),
+                ));
+            }
             Ok((Some(d), None))
         }
         (None, Some(f)) => {
             let d = Decimal::from_str(f)
                 .map_err(|e| AppError::InvalidInput(format!("bad discount fixed: {e}")))?;
+            if d < Decimal::ZERO {
+                return Err(AppError::InvalidInput(
+                    "discount fixed amount must be non-negative".into(),
+                ));
+            }
             Ok((None, Some(MinorUnits::from_decimal(d))))
         }
         (None, None) => Ok((None, None)),
@@ -895,6 +929,20 @@ fn parse_items(
         out.push(item);
     }
     Ok(out)
+}
+
+fn normalize_credit_note_items(items: &mut [InvoiceItem]) {
+    for item in items {
+        let line = crate::money::line_total_discounted(
+            item.qty,
+            item.unit_price,
+            item.discount_rate,
+            item.discount_fixed,
+        );
+        if line.0 > 0 {
+            item.qty = -item.qty;
+        }
+    }
 }
 
 fn item_from_product(

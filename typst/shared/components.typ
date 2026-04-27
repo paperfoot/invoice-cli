@@ -76,19 +76,21 @@
 //
 // Hierarchy comes from WEIGHT (bold vs regular) and COLOUR (ink vs mute),
 // never from size. Size only varies for headings and labels, nowhere else.
-#let party-block(party, theme, label-text: "To") = {
+#let party-block(party, theme, label-text: "To", show-name: true) = {
   let mute = th(theme, "mute", rgb("#666"))
   let display = th(theme, "display-font", ("Inter",))
   let has(k) = k in party and party.at(k) != none
   lbl(theme, label-text)
   v(sp.s)
-  text(font: display, size: 11pt, weight: 600)[#party.name]
-  linebreak()
-  if has("legal-name") and party.legal-name != party.name {
+  if show-name {
+    text(font: display, size: 11pt, weight: 600)[#party.name]
+    linebreak()
+  }
+  if show-name and has("legal-name") and party.legal-name != party.name {
     text(size: 9.5pt, fill: mute, style: "italic")[#party.legal-name]
     linebreak()
   }
-  if has("attn") {
+  if has("attn") and party.attn != party.name {
     text(size: 9.5pt, fill: mute)[#party.attn]
     linebreak()
   }
@@ -211,7 +213,7 @@
   )
 }
 
-#let tax-totals(totals, theme, currency-symbol: "S$", width: 84mm, tax-label: "Tax") = {
+#let tax-totals(totals, theme, currency-symbol: "S$", width: 84mm, tax-label: "Tax", total-label: none) = {
   let variant = th(theme, "totals-variant", "minimal")
   let mute    = th(theme, "mute", rgb("#666"))
   let accent  = th(theme, "accent", rgb("#333"))
@@ -225,6 +227,7 @@
   // rhythm across the doc reads as one voice; colour alone distinguishes
   // label from value.
   let label-mut(t) = text(size: 9.5pt, fill: mute)[#t]
+  let total-label-text(default) = if total-label == none { default } else { total-label }
 
   if variant == "minimal" {
     align(right)[
@@ -243,7 +246,7 @@
           columns: (1fr, auto),
           column-gutter: sp.l,
           align: (left + horizon, right + horizon),
-          text(size: 11pt, weight: 600)[Total due],
+          text(size: 11pt, weight: 600)[#total-label-text("Total due")],
           _fit-total(money(totals.total, symbol: currency-symbol), display, 500, width - 40mm),
         )
       ]
@@ -267,7 +270,7 @@
           columns: (1fr, auto),
           column-gutter: sp.xl,
           align: (left + horizon, right + horizon),
-          text(font: display, size: 12pt, style: "italic")[Total payable],
+          text(font: display, size: 12pt, style: "italic")[#total-label-text("Total payable")],
           _fit-total(money(totals.total, symbol: currency-symbol), display, 500, width - 42mm),
         )
         #v(sp.m)
@@ -291,7 +294,7 @@
           columns: (1fr, auto),
           column-gutter: sp.m,
           align: (left + horizon, right + horizon),
-          lbl(theme, "Total due →", fill: ink, size: 9pt),
+          lbl(theme, total-label-text("Total due") + " →", fill: ink, size: 9pt),
           _fit-total(money(totals.total, symbol: currency-symbol), th(theme, "mono-font", ("Menlo",)), 600, width - 36mm, accent: accent),
         )
       ]
@@ -317,7 +320,7 @@
             columns: (1fr, auto),
             column-gutter: sp.m,
             align: (left + horizon, right + horizon),
-            text(size: 10pt, fill: paper, tracking: 1.4pt, weight: 500)[#upper("Total due")],
+            text(size: 10pt, fill: paper, tracking: 1.4pt, weight: 500)[#upper(total-label-text("Total due"))],
             _fit-total(money(totals.total, symbol: currency-symbol), display, 700, width - 38mm, accent: accent, sizes: (18pt, 16pt, 15pt, 13pt, 12pt)),
           )
         ]
@@ -341,7 +344,7 @@
           columns: (1fr, auto),
           column-gutter: sp.l,
           align: (left + horizon, right + horizon),
-          text(size: 10pt, tracking: 1.4pt, weight: 600)[#upper("Total due")],
+          text(size: 10pt, tracking: 1.4pt, weight: 600)[#upper(total-label-text("Total due"))],
           _fit-total(money(totals.total, symbol: currency-symbol), display, 600, width - 40mm, accent: accent, sizes: (18pt, 16pt, 15pt, 13pt, 12pt)),
         )
       ]
@@ -367,7 +370,7 @@
             columns: (1fr, auto),
             column-gutter: sp.l,
             align: (left + horizon, right + horizon),
-            text(size: 10pt, tracking: 1.4pt, weight: 600, fill: accent)[#upper("Total due")],
+            text(size: 10pt, tracking: 1.4pt, weight: 600, fill: accent)[#upper(total-label-text("Total due"))],
             _fit-total(money(totals.total, symbol: currency-symbol), display, 700, width - 40mm, accent: accent, sizes: (17pt, 15pt, 14pt, 13pt, 12pt)),
           )
         ]
@@ -392,7 +395,7 @@
           columns: (1fr, auto),
           column-gutter: sp.m,
           align: (left + horizon, right + horizon),
-          text(font: display, size: 12pt, style: "italic", fill: accent)[Total due],
+          text(font: display, size: 12pt, style: "italic", fill: accent)[#total-label-text("Total due")],
           _fit-total(money(totals.total, symbol: currency-symbol), display, 600, width - 36mm, accent: accent),
         )
       ]
@@ -527,7 +530,7 @@
   let cells = ()
   for line in bank.lines {
     if line.label != "" {
-      cells.push(text(size: 8.5pt, fill: mute, tracking: 0.02em)[#line.label])
+      cells.push(text(size: 8.5pt, fill: mute, tracking: 0.02em)[#line.label:])
       cells.push(text(size: 8.5pt, font: mono, number-width: "tabular")[#line.value])
     } else {
       // Continuation line without a label — span both columns visually.
@@ -539,7 +542,7 @@
     columns: (auto, 1fr),
     column-gutter: sp.s,
     row-gutter: sp.xs,
-    // Right-align labels so the colon-less hierarchy shows as a
+    // Right-align labels so the hierarchy shows as a
     // clean invisible axis between label column and value column.
     align: (right + top, left + top),
     ..cells,

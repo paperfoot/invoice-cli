@@ -53,7 +53,9 @@ pub fn run(ctx: Ctx, check: bool) -> Result<()> {
             "updated": false,
             "note": "already on latest",
         });
-        print_success(ctx, &payload, |_| println!("already on latest ({})", current));
+        print_success(ctx, &payload, |_| {
+            println!("already on latest ({})", current)
+        });
         return Ok(());
     }
 

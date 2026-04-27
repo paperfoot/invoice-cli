@@ -96,7 +96,8 @@ invoice issuer add acme \
     --name "Acme Studio" --jurisdiction sg --tax-registered \
     --tax-id "M2-1234567-8" --address "1 Marina Bay\nSingapore 018989" \
     --template boutique --logo ~/Pictures/acme.png \
-    --bank-name "DBS" --bank-iban "SG11DBSS..." --bank-bic "DBSSSGSG"
+    --bank-line "Bank: DBS" --bank-line "IBAN: SG11DBSS..." \
+    --bank-line "SWIFT: DBSSSGSG"
 
 # 2. Add a client, pinning acme as their default issuer
 invoice clients add meridian \
@@ -110,6 +111,7 @@ invoice products add design \
     --price 8400 --currency SGD --tax-rate 9
 
 # 4. Create an invoice — no --as needed, uses client's default issuer
+#    (or config.default_issuer if the client has no pinned issuer)
 invoice invoices new --client meridian --item design --due 30d
 
 # 5. Render + open
@@ -119,7 +121,8 @@ invoice invoices render 2026-0001 --open
 invoice invoices mark 2026-0001 paid
 invoice invoices duplicate 2026-0001
 
-# 7. Need a refund? Credit note against the original:
+# 7. Need a refund? Credit note against the original. Positive refund
+# specs are stored as credits automatically:
 invoice invoices credit-note 2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
 
 # 8. Month-end accountant handoff
@@ -178,9 +181,12 @@ On `invoices new`, each `--item` is one of:
 
 ## State & privacy
 
-- **Config:** `~/.config/invoice/config.toml` (Linux) or
-  `~/Library/Application Support/com.199-biotechnologies.invoice/` (macOS)
-- **Database:** `~/.local/share/invoice/invoice.db` (SQLite, WAL mode)
+- **Config:** shared Paperfoot accounting config. Run `invoice config path`
+  for the exact OS path; on macOS it lives under
+  `~/Library/Application Support/com.paperfoot.accounting/`.
+- **Database:** shared Paperfoot accounting SQLite database
+  (`accounting.db` in the shared state dir; `invoice agent-info` reports the
+  exact path).
 - **Templates:** extracted once to the state dir, refreshed on upgrade
 
 Nothing ever leaves your machine unless you choose to — no telemetry, no

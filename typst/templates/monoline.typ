@@ -52,7 +52,7 @@
       100mm,
       s => text(size: s, weight: 500, tracking: 1.4pt)[#upper(d.issuer.name)],
     )
-    #if "legal-name" in d.issuer and d.issuer.legal-name != none [
+    #if "legal-name" in d.issuer and d.issuer.legal-name != none and d.issuer.legal-name != d.issuer.name [
       #v(-1pt)
       #text(size: 8.5pt, fill: theme.mute)[#d.issuer.legal-name]
     ]
@@ -80,7 +80,7 @@
   columns: (1fr, 1fr),
   column-gutter: 10mm,
   party-block(d.client, theme, label-text: "Bill to"),
-  party-block(d.issuer, theme, label-text: "Bill from"),
+  party-block(d.issuer, theme, label-text: "Bill from", show-name: false),
 )
 
 #v(mm-sp.s)
@@ -140,7 +140,7 @@
 ]
 
 #v(mm-sp.s)
-#tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 82mm, tax-label: d.invoice.tax-label)
+#tax-totals(totals, theme, currency-symbol: d.invoice.symbol, width: 82mm, tax-label: d.invoice.tax-label, total-label: if d.invoice.kind == "credit-note" { "Total credit" } else { none })
 
 // Invoice-level discount row.
 #if "discount" in totals and totals.discount != none [
@@ -171,12 +171,13 @@
 #v(mm-sp.m)
 #line(length: 100%, stroke: 0.5pt + theme.dim)
 #v(mm-sp.xs)
+#let payment-label = if d.invoice.kind == "credit-note" { "Payment details" } else { "Pay to" }
 #block(breakable: false)[
   #if "qr" in d and d.qr != none {
     grid(
       columns: (1.2fr, 1fr, auto),
       column-gutter: 10mm,
-      payment-block(d.issuer.bank, theme, label-text: "Pay to"),
+      payment-block(d.issuer.bank, theme, label-text: payment-label),
       notes-block(d.notes, theme, label-text: "Notes"),
       [
         #qr-render(d.qr.modules, size: 24mm, fg: theme.accent, bg: theme.paper, style: theme.qr-style)
@@ -188,7 +189,7 @@
     grid(
       columns: (1.2fr, 1fr),
       column-gutter: 10mm,
-      payment-block(d.issuer.bank, theme, label-text: "Pay to"),
+      payment-block(d.issuer.bank, theme, label-text: payment-label),
       notes-block(d.notes, theme, label-text: "Notes"),
     )
   }

@@ -20,9 +20,11 @@
     tax-id: none,
     company-no: none,
     bank: (
-      name: "Example Bank",
-      iban: "XX00 XXXX 0000 0000 0000",
-      bic: "XXXXXX00",
+      lines: (
+        (label: "Bank", value: "Example Bank"),
+        (label: "Account", value: "12345678"),
+        (label: "SWIFT", value: "XXXXXX00"),
+      ),
     ),
     logo: none,
   ),

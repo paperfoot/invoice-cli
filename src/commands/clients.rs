@@ -1,4 +1,5 @@
 use crate::cli::ClientCmd;
+use crate::commands::split_multiline_arg;
 use crate::db::{self, Client};
 use crate::error::{AppError, Result};
 use crate::output::{print_success, Ctx};
@@ -19,9 +20,8 @@ pub fn run(cmd: ClientCmd, ctx: Ctx) -> Result<()> {
             default_template,
         } => {
             if let Some(ref iss) = default_issuer {
-                db::issuer_by_slug(&conn, iss).map_err(|_| {
-                    AppError::InvalidInput(format!("unknown issuer '{iss}'"))
-                })?;
+                db::issuer_by_slug(&conn, iss)
+                    .map_err(|_| AppError::InvalidInput(format!("unknown issuer '{iss}'")))?;
             }
             if let Some(ref tmpl) = default_template {
                 if !crate::typst_assets::has_template(tmpl)? {
@@ -38,7 +38,7 @@ pub fn run(cmd: ClientCmd, ctx: Ctx) -> Result<()> {
                 attn,
                 country,
                 tax_id,
-                address: address.split('\n').map(|s| s.to_string()).collect(),
+                address: split_multiline_arg(&address),
                 email,
                 notes,
                 default_issuer_slug: default_issuer,
@@ -47,7 +47,9 @@ pub fn run(cmd: ClientCmd, ctx: Ctx) -> Result<()> {
             let id = db::client_create(&conn, &client)?;
             let mut out = client.clone();
             out.id = id;
-            print_success(ctx, &out, |c| println!("added client '{}' (id {})", c.slug, c.id));
+            print_success(ctx, &out, |c| {
+                println!("added client '{}' (id {})", c.slug, c.id)
+            });
             Ok(())
         }
         ClientCmd::Edit {
@@ -63,9 +65,8 @@ pub fn run(cmd: ClientCmd, ctx: Ctx) -> Result<()> {
             default_template,
         } => {
             if let Some(ref iss) = default_issuer {
-                db::issuer_by_slug(&conn, iss).map_err(|_| {
-                    AppError::InvalidInput(format!("unknown issuer '{iss}'"))
-                })?;
+                db::issuer_by_slug(&conn, iss)
+                    .map_err(|_| AppError::InvalidInput(format!("unknown issuer '{iss}'")))?;
             }
             if let Some(ref tmpl) = default_template {
                 if !crate::typst_assets::has_template(tmpl)? {
@@ -89,7 +90,7 @@ pub fn run(cmd: ClientCmd, ctx: Ctx) -> Result<()> {
                 client.tax_id = Some(v);
             }
             if let Some(v) = address {
-                client.address = v.split('\n').map(|s| s.to_string()).collect();
+                client.address = split_multiline_arg(&v);
             }
             if let Some(v) = email {
                 client.email = Some(v);
@@ -110,9 +111,8 @@ pub fn run(cmd: ClientCmd, ctx: Ctx) -> Result<()> {
             Ok(())
         }
         ClientCmd::SetIssuer { slug, issuer_slug } => {
-            db::issuer_by_slug(&conn, &issuer_slug).map_err(|_| {
-                AppError::InvalidInput(format!("unknown issuer '{issuer_slug}'"))
-            })?;
+            db::issuer_by_slug(&conn, &issuer_slug)
+                .map_err(|_| AppError::InvalidInput(format!("unknown issuer '{issuer_slug}'")))?;
             let mut client = db::client_by_slug(&conn, &slug)?;
             client.default_issuer_slug = Some(issuer_slug);
             db::client_update(&conn, &client)?;

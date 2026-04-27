@@ -1,4 +1,5 @@
 use crate::cli::IssuerCmd;
+use crate::commands::split_multiline_arg;
 use crate::db::{self, Issuer};
 use crate::error::{AppError, Result};
 use crate::output::{print_success, Ctx};
@@ -40,7 +41,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                 tax_id,
                 company_no,
                 tagline: None,
-                address: address.split('\n').map(|s| s.to_string()).collect(),
+                address: split_multiline_arg(&address),
                 email,
                 phone,
                 bank_details: if bank_line.is_empty() {
@@ -59,7 +60,9 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             let id = db::issuer_create(&conn, &issuer)?;
             let mut out = issuer.clone();
             out.id = id;
-            print_success(ctx, &out, |i| println!("added issuer '{}' (id {})", i.slug, i.id));
+            print_success(ctx, &out, |i| {
+                println!("added issuer '{}' (id {})", i.slug, i.id)
+            });
             Ok(())
         }
         IssuerCmd::List => {
@@ -74,7 +77,11 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                         i.slug,
                         i.name,
                         i.jurisdiction.as_str(),
-                        if i.tax_registered { "tax-registered" } else { "-" }
+                        if i.tax_registered {
+                            "tax-registered"
+                        } else {
+                            "-"
+                        }
                     );
                 }
             });
@@ -141,7 +148,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                 issuer.tagline = Some(v);
             }
             if let Some(v) = address {
-                issuer.address = v.split('\n').map(|s| s.to_string()).collect();
+                issuer.address = split_multiline_arg(&v);
             }
             if let Some(v) = email {
                 issuer.email = Some(v);

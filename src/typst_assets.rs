@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Embedded Typst sources. Extracted to ~/.local/share/invoice/typst/ on first
-// use so templates can reference each other via relative #import paths.
+// Embedded Typst sources. Extracted into the shared accounting-suite assets
+// directory on first use so templates can reference each other via relative
+// #import paths.
 // ═══════════════════════════════════════════════════════════════════════════
 
 use rust_embed::RustEmbed;

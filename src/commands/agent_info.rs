@@ -3,6 +3,10 @@ use crate::output::{print_raw, Ctx};
 use crate::tax;
 
 pub fn run(_ctx: Ctx) -> Result<()> {
+    let config_path = crate::config::config_path()?.display().to_string();
+    let state_dir = crate::config::state_path()?.display().to_string();
+    let database = crate::config::db_path()?.display().to_string();
+
     let profiles: Vec<_> = tax::all_profiles()
         .into_iter()
         .map(|p| {
@@ -40,12 +44,12 @@ pub fn run(_ctx: Ctx) -> Result<()> {
         ("products list | ls", "List products"),
         ("products show <slug> | get", "Show product details"),
         ("products delete <slug> | rm", "Delete a product"),
-        ("invoices new [--as <issuer>] --client <client> --item <spec>... [--discount-rate R | --discount-fixed X]", "Create a new invoice (omit --as when client has a default_issuer). Optional invoice-level discount (percent OR fixed major-units)"),
+        ("invoices new [--as <issuer>] --client <client> --item <spec>... [--discount-rate R | --discount-fixed X]", "Create a new invoice (omit --as when client has a default_issuer or config.default_issuer). Optional invoice-level discount (percent OR fixed major-units)"),
         ("invoices edit <number> [--client ... --due ... --terms ... --notes ... --currency ... --pay-link ... --reverse-charge ... --discount-rate ... --discount-fixed ...]", "Edit DRAFT invoice metadata only — issued/paid/void invoices are immutable; use credit-note instead"),
-        ("invoices items <number> add <spec> [--subtitle ... --discount-rate ... --discount-fixed ...]", "Add a line item to a DRAFT invoice (spec: 'product-slug[:qty]' OR 'Description:qty:price[:rate]')"),
-        ("invoices items <number> remove <position> | rm", "Remove the line at zero-indexed position from a DRAFT invoice"),
-        ("invoices items <number> edit <position> [--description ... --subtitle ... --qty ... --unit ... --price ... --tax-rate ... --discount-rate ... --discount-fixed ...]", "Edit any subset of a DRAFT invoice line's fields"),
-        ("invoices credit-note <number> [--full | --item <spec>...] [--notes ... --pay-link ...]", "Issue a credit note against an existing invoice. --full clones source items as positive reversal; --item lets you specify exact refund lines"),
+        ("invoices items add <number> <spec> [--subtitle ... --discount-rate ... --discount-fixed ...]", "Add a line item to a DRAFT invoice (spec: 'product-slug[:qty]' OR 'Description:qty:price[:rate]')"),
+        ("invoices items remove <number> <position> | rm", "Remove the line at zero-indexed position from a DRAFT invoice"),
+        ("invoices items edit <number> <position> [--description ... --subtitle ... --qty ... --unit ... --price ... --tax-rate ... --discount-rate ... --discount-fixed ...]", "Edit any subset of a DRAFT invoice line's fields"),
+        ("invoices credit-note <number> [--full | --item <spec>...] [--notes ... --pay-link ...]", "Issue a credit note against an existing invoice. --full reverses source items; --item accepts positive refund specs and stores them as credits"),
         ("invoices aging [--as <issuer>]", "Ageing report for unpaid invoices, bucketed 0-30 / 31-60 / 61-90 / 90+ days past due"),
         ("invoices export [--from YYYY-MM-DD --to YYYY-MM-DD --format csv|json --out PATH --as <issuer>]", "Export invoices for accountant handoff. Defaults to CSV on stdout when --out omitted"),
         ("invoices duplicate <number> [--client C --as I --due 30d]", "Clone an invoice's line items into a new draft (for recurring billing)"),
@@ -64,7 +68,10 @@ pub fn run(_ctx: Ctx) -> Result<()> {
     ];
     let mut commands = serde_json::Map::new();
     for (k, v) in commands_list {
-        commands.insert((*k).to_string(), serde_json::Value::String((*v).to_string()));
+        commands.insert(
+            (*k).to_string(),
+            serde_json::Value::String((*v).to_string()),
+        );
     }
 
     let manifest = serde_json::json!({
@@ -89,9 +96,9 @@ pub fn run(_ctx: Ctx) -> Result<()> {
             "data": "… (success)",
             "error": "{ code, message, suggestion } (error)"
         },
-        "config_path": "~/.config/invoice/config.toml",
-        "state_dir": "~/.local/share/invoice/",
-        "database": "~/.local/share/invoice/invoice.db",
+        "config_path": config_path,
+        "state_dir": state_dir,
+        "database": database,
         "templates": ["helvetica-nera", "tiefletter-gold", "monoline", "vienna", "boutique"],
         "tax_profiles": profiles,
         "item_spec": "product-slug[:qty]  OR  description:qty:price[:rate]"

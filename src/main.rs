@@ -24,10 +24,7 @@ fn main() {
             }
             // Parse errors: exit 3 (bad input)
             let fmt = output::Format::detect(json_flag);
-            output::print_error(
-                fmt,
-                &error::AppError::InvalidInput(e.to_string()),
-            );
+            output::print_error(fmt, &error::AppError::InvalidInput(e.to_string()));
             exit(3);
         }
     };

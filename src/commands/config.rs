@@ -23,16 +23,19 @@ pub fn run(cmd: ConfigCmd, ctx: Ctx) -> Result<()> {
             } else {
                 String::new()
             };
-            let mut doc: toml::Value = toml::from_str(&existing).unwrap_or(toml::Value::Table(Default::default()));
+            let mut doc: toml::Value =
+                toml::from_str(&existing).unwrap_or(toml::Value::Table(Default::default()));
             if let toml::Value::Table(ref mut t) = doc {
                 t.insert(key.clone(), parse_value(&value));
             } else {
                 return Err(AppError::Config("config root is not a table".into()));
             }
             std::fs::write(&path, toml::to_string_pretty(&doc).unwrap())?;
-            print_success(ctx, &serde_json::json!({"key": key, "value": value}), |_| {
-                println!("set {} = {}", key, value)
-            });
+            print_success(
+                ctx,
+                &serde_json::json!({"key": key, "value": value}),
+                |_| println!("set {} = {}", key, value),
+            );
             Ok(())
         }
     }

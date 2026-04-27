@@ -16,7 +16,10 @@ fn main() {
     println!("  label: \"{}\",", qr.label);
     println!("  modules: (");
     for row in &qr.modules {
-        let cells: Vec<&str> = row.iter().map(|b| if *b { "true" } else { "false" }).collect();
+        let cells: Vec<&str> = row
+            .iter()
+            .map(|b| if *b { "true" } else { "false" })
+            .collect();
         println!("    ({}),", cells.join(", "));
     }
     println!("  ),");

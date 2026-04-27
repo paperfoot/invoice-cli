@@ -12,8 +12,8 @@
 
 use std::path::PathBuf;
 
-pub use finance_core::settings::Settings as Config;
 use finance_core::paths::Paths;
+pub use finance_core::settings::Settings as Config;
 
 use crate::error::Result;
 
