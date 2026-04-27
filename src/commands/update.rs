@@ -60,10 +60,14 @@ pub fn run(ctx: Ctx, check: bool) -> Result<()> {
     }
 
     // Detect install method and use the right upgrade command.
-    let cmd = install_upgrade_command();
-    eprintln!("upgrading {current} → {latest} via: {}", cmd.join(" "));
-    let status = Command::new(&cmd[0])
-        .args(&cmd[1..])
+    let cmd = install_upgrade_command()?;
+    eprintln!("upgrading {current} → {latest} via: {}", cmd.display());
+    let mut child = Command::new(&cmd.program);
+    child.args(&cmd.args);
+    for (key, value) in &cmd.env {
+        child.env(key, value);
+    }
+    let status = child
         .status()
         .map_err(|e| AppError::Other(format!("failed to launch upgrader: {e}")))?;
 
@@ -74,11 +78,19 @@ pub fn run(ctx: Ctx, check: bool) -> Result<()> {
         )));
     }
 
+    let installed = installed_invoice_version()?;
+    if version_newer_than(&latest, &installed) {
+        return Err(AppError::Other(format!(
+            "upgrade completed but `invoice --version` reports {installed}, expected {latest}"
+        )));
+    }
+
     let payload = serde_json::json!({
         "current": current,
         "latest": latest,
+        "installed": installed,
         "updated": true,
-        "method": cmd.join(" "),
+        "method": cmd.display(),
     });
     print_success(ctx, &payload, |_| {
         println!("upgraded to {latest}. verify with: invoice --version")
@@ -143,22 +155,99 @@ fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     ))
 }
 
+struct UpgradeCommand {
+    program: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+impl UpgradeCommand {
+    fn display(&self) -> String {
+        let mut parts = Vec::with_capacity(1 + self.args.len());
+        parts.push(self.program.as_str());
+        parts.extend(self.args.iter().map(String::as_str));
+        parts.join(" ")
+    }
+}
+
 /// Pick the right upgrader. Prefer Homebrew on macOS when `brew` is on PATH
 /// and the binary lives under a brew prefix; otherwise fall back to cargo.
-fn install_upgrade_command() -> Vec<String> {
+fn install_upgrade_command() -> Result<UpgradeCommand> {
     if cfg!(target_os = "macos") && running_under_brew() {
-        return vec![
-            "brew".into(),
-            "upgrade".into(),
-            "199-biotechnologies/tap/invoice".into(),
-        ];
+        refresh_homebrew_tap()?;
+        return Ok(UpgradeCommand {
+            program: "brew".into(),
+            args: vec!["upgrade".into(), "199-biotechnologies/tap/invoice".into()],
+            // The tap was refreshed directly above. Avoid failing because an
+            // unrelated local tap is broken during Homebrew auto-update.
+            env: vec![("HOMEBREW_NO_AUTO_UPDATE".into(), "1".into())],
+        });
     }
-    vec![
-        "cargo".into(),
-        "install".into(),
-        "--force".into(),
-        "invoice-cli".into(),
-    ]
+    Ok(UpgradeCommand {
+        program: "cargo".into(),
+        args: vec![
+            "install".into(),
+            "--force".into(),
+            "--locked".into(),
+            "invoice-cli".into(),
+        ],
+        env: Vec::new(),
+    })
+}
+
+fn refresh_homebrew_tap() -> Result<()> {
+    let repo = Command::new("brew")
+        .args(["--repo", "199-biotechnologies/tap"])
+        .output()
+        .map_err(|e| AppError::Other(format!("failed to locate Homebrew tap: {e}")))?;
+    if !repo.status.success() {
+        return Err(AppError::Other(format!(
+            "failed to locate Homebrew tap (exit {})",
+            repo.status.code().unwrap_or(-1)
+        )));
+    }
+    let path = String::from_utf8_lossy(&repo.stdout).trim().to_string();
+    if path.is_empty() {
+        return Err(AppError::Other(
+            "brew --repo returned an empty tap path".into(),
+        ));
+    }
+
+    eprintln!("refreshing Homebrew tap: git -C {path} pull --ff-only");
+    let status = Command::new("git")
+        .args(["-C", &path, "pull", "--ff-only"])
+        .status()
+        .map_err(|e| AppError::Other(format!("failed to refresh Homebrew tap: {e}")))?;
+    if !status.success() {
+        return Err(AppError::Other(format!(
+            "failed to refresh Homebrew tap (exit {})",
+            status.code().unwrap_or(-1)
+        )));
+    }
+    Ok(())
+}
+
+fn installed_invoice_version() -> Result<String> {
+    let out = Command::new("invoice")
+        .arg("--version")
+        .output()
+        .map_err(|e| AppError::Other(format!("failed to verify installed invoice: {e}")))?;
+    if !out.status.success() {
+        return Err(AppError::Other(format!(
+            "invoice --version failed after upgrade (exit {})",
+            out.status.code().unwrap_or(-1)
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    parse_invoice_version(&stdout)
+        .ok_or_else(|| AppError::Other(format!("could not parse invoice version from: {stdout}")))
+}
+
+fn parse_invoice_version(output: &str) -> Option<String> {
+    output
+        .split_whitespace()
+        .find(|part| parse_version(part).is_some())
+        .map(ToOwned::to_owned)
 }
 
 fn running_under_brew() -> bool {
@@ -168,4 +257,24 @@ fn running_under_brew() -> bool {
     };
     let s = exe.to_string_lossy();
     s.contains("/homebrew/") || s.contains("/Cellar/") || s.contains("/opt/homebrew/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_invoice_version_output() {
+        assert_eq!(
+            parse_invoice_version("invoice 0.5.9\n").as_deref(),
+            Some("0.5.9")
+        );
+    }
+
+    #[test]
+    fn compares_semver_versions() {
+        assert!(version_newer_than("0.5.10", "0.5.9"));
+        assert!(!version_newer_than("0.5.9", "0.5.9"));
+        assert!(!version_newer_than("0.5.9", "0.5.10"));
+    }
 }
