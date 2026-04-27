@@ -61,11 +61,20 @@ jobs:
           echo "pkg=${PKG}" >> "$GITHUB_OUTPUT"
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ steps.package.outputs.pkg }}.tar.gz
-            ${{ steps.package.outputs.pkg }}.tar.gz.sha256
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Release $GITHUB_REF_NAME" || gh release view "$GITHUB_REF_NAME" >/dev/null
+          fi
+          gh release upload "$GITHUB_REF_NAME" \
+            "${{ steps.package.outputs.pkg }}.tar.gz" \
+            "${{ steps.package.outputs.pkg }}.tar.gz.sha256" \
+            --clobber
 
   crates-io:
     name: publish crates.io
