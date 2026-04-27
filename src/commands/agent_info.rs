@@ -26,8 +26,8 @@ pub fn run(_ctx: Ctx) -> Result<()> {
     // Built outside the json! macro to avoid hitting the proc-macro recursion
     // limit as the command surface grows.
     let commands_list: &[(&str, &str)] = &[
-        ("issuer add <slug> --name X --jurisdiction sg|uk|us|eu --address ... [--logo PATH]", "Register an issuer (billing entity). --logo points to a PNG/SVG/JPG rendered in template header"),
-        ("issuer edit <slug> [--name ... --template ... --jurisdiction ... --logo PATH etc]", "Update any subset of an issuer's fields (incl. logo path)"),
+        ("issuer add <slug> --name X --jurisdiction sg|uk|us|eu --address ... [--logo PATH --number-format F]", "Register an issuer (billing entity). New issuers default to {issuer}-{year}-{seq:04} so invoice numbers are globally addressable"),
+        ("issuer edit <slug> [--name ... --template ... --jurisdiction ... --number-format ... --logo PATH etc]", "Update any subset of an issuer's fields (incl. logo path and numbering format)"),
         ("issuer set-template <slug> <template>", "Shorthand: change an issuer's default template"),
         ("issuer list | ls", "List issuers"),
         ("issuer show <slug> | get", "Show issuer details"),
@@ -101,7 +101,50 @@ pub fn run(_ctx: Ctx) -> Result<()> {
         "database": database,
         "templates": ["helvetica-nera", "tiefletter-gold", "monoline", "vienna", "boutique"],
         "tax_profiles": profiles,
-        "item_spec": "product-slug[:qty]  OR  description:qty:price[:rate]"
+        "item_spec": "product-slug[:qty]  OR  description:qty:price[:rate]",
+        "config_keys": {
+            "default_issuer": "Issuer slug used by invoices new when --as is omitted and the client has no default issuer. `invoice config set default_issuer unset` clears it.",
+            "self_update": "Reserved shared setting for updater behavior across the suite."
+        },
+        "first_run": [
+            "invoice doctor --json",
+            "invoice issuer add <slug> --name <display-name> --jurisdiction sg|uk|us|eu|custom --address \"line1\\nline2\"",
+            "invoice config set default_issuer <issuer-slug>",
+            "invoice clients add <slug> --name <client-name> --address \"line1\\nline2\" --default-issuer <issuer-slug>",
+            "invoice invoices new --client <client-slug> --item \"Description:1:100:20\""
+        ],
+        "examples": [
+            {
+                "goal": "Create an invoice using client/default issuer routing",
+                "command": "invoice invoices new --client meridian --item \"Consulting:1:1200:20\" --json"
+            },
+            {
+                "goal": "Create an invoice for a specific company",
+                "command": "invoice invoices new --as paperfoot --client meridian --item design:1 --json"
+            },
+            {
+                "goal": "Render an invoice PDF",
+                "command": "invoice invoices render paperfoot-2026-0001 --json"
+            },
+            {
+                "goal": "Issue a full credit note",
+                "command": "invoice invoices credit-note paperfoot-2026-0001 --full --json"
+            }
+        ],
+        "multi_company_model": {
+            "issuer": "The company/person billing as. Each issuer owns tax profile, logo, bank details, default notes/output dir, and its own sequence counter.",
+            "client": "The customer. A client may pin default_issuer and default_template.",
+            "invoice_numbering": "Invoice numbers are globally addressable by the CLI. New issuers default to {issuer}-{year}-{seq:04}; legacy colliding formats are auto-prefixed with the issuer slug on collision.",
+            "recommended_default": "Set config.default_issuer for single-company workflows; use client.default_issuer or explicit --as for multi-company workflows."
+        },
+        "guardrails": [
+            "Run doctor before first use and after changing config.",
+            "Prefer --json for agents; stdout is data and stderr is diagnostics.",
+            "Use globally unique issuer number formats, ideally {issuer}-{year}-{seq:04}.",
+            "Do not delete issued invoices; mark void or create a credit note.",
+            "Use invoice numbers returned by JSON responses rather than guessing the next sequence.",
+            "Pin client default issuers when the same customer is always billed by the same company."
+        ]
     });
 
     print_raw(&manifest);

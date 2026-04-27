@@ -104,6 +104,10 @@ pub enum IssuerCmd {
         /// etc.
         #[arg(long)]
         notes: Option<String>,
+        /// Invoice number format. Tokens: {issuer}, {year}, {seq}, {seq:04}.
+        /// Default includes {issuer} so multiple companies cannot collide.
+        #[arg(long)]
+        number_format: Option<String>,
     },
     /// Edit an existing issuer — pass only the fields you want to change
     Edit {
@@ -142,6 +146,8 @@ pub enum IssuerCmd {
         currency: Option<String>,
         #[arg(long)]
         symbol: Option<String>,
+        /// Invoice number format. Tokens: {issuer}, {year}, {seq}, {seq:04}.
+        /// Use a unique prefix per issuer for globally addressable invoice ids.
         #[arg(long)]
         number_format: Option<String>,
         #[arg(long)]

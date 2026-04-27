@@ -24,9 +24,9 @@ invoice clients add meridian --name "Meridian & Co." --country US --address "...
     --default-issuer acme --default-template boutique
 invoice products add design --description "Design engagement" --unit project --price 8400 --currency SGD --tax-rate 9
 invoice invoices new --client meridian --item design --due 30d   # no --as needed: uses client default
-invoice invoices render 2026-0001 --open                          # uses client.default_template
-invoice invoices mark 2026-0001 paid                              # auto-stamps paid_at
-invoice invoices duplicate 2026-0001                              # clone for next month's billing
+invoice invoices render acme-2026-0001 --open                     # uses client.default_template
+invoice invoices mark acme-2026-0001 paid                         # auto-stamps paid_at
+invoice invoices duplicate acme-2026-0001                         # clone for next month's billing
 ```
 
 ### Editing existing records
@@ -52,9 +52,9 @@ invoice issuer edit acme --logo ~/Pictures/acme.png
 DRAFT invoices are mutable; once `issued`/`paid`/`void` they're immutable — use a credit note.
 
 ```
-invoice invoices edit 2026-0001 --notes "Net 14 — early-payment 2% discount"
-invoice invoices items add 2026-0001 "Extra fee:1:500"
-invoice invoices credit-note 2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
+invoice invoices edit acme-2026-0001 --notes "Net 14 — early-payment 2% discount"
+invoice invoices items add acme-2026-0001 "Extra fee:1:500"
+invoice invoices credit-note acme-2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
 ```
 
 ### Aging & export
@@ -75,10 +75,12 @@ invoice invoices new --client meridian --item design --discount-rate 10
 ### Tips
 
 - Run `invoice agent-info` for the full JSON capability manifest.
-- Run `invoice doctor` to verify typst is installed & DB is ready.
+- Run `invoice doctor --json` to verify typst, DB, default issuer, and multi-company numbering.
 - Item spec supports `product-slug[:qty]` OR `description:qty:price[:rate]`.
 - Template resolution at render: `--template` flag > client.default_template > issuer.default_template > `vienna`.
 - `--as` picks the issuer; omit it when the client has `default_issuer` pinned or `config.default_issuer` is set.
+- New issuers default to `{issuer}-{year}-{seq:04}` so invoice numbers are globally addressable; use `issuer edit --number-format` for per-company custom prefixes.
+- Use invoice numbers returned by JSON responses instead of predicting the next sequence.
 - `mark issued` / `mark paid` auto-stamp `issued_at` / `paid_at` (first transition only).
 - `invoices list` shows totals per invoice (computed with `rust_decimal`).
 - Every tax value is computed with `rust_decimal` — no float rounding.

@@ -24,7 +24,9 @@ interface built for agents.
 
 - **Multi-issuer first-class.** Run several companies (SG Pte. Ltd., UK Ltd.,
   US LLC, …) from one binary. Each issuer has its own jurisdiction, tax
-  profile, default template, numbering series, and logo.
+  profile, default template, numbering series, and logo. New issuers default
+  to `{issuer}-{year}-{seq:04}` numbering so invoice IDs stay globally
+  addressable for agents even when several companies share one database.
 - **Per-client defaults.** Pin a default issuer and/or template per client —
   then just `invoice invoices new --client meridian --item design` and the
   right entity + branding lights up automatically.
@@ -43,7 +45,8 @@ interface built for agents.
   the header at the appropriate size for its design language.
 - **Credit notes.** Issue against any existing invoice with `credit-note
   --full` (full reversal) or `--item ...` (specific refund lines). Independent
-  `CN-YYYY-NNNN` numbering series so credit notes don't collide with invoices.
+  `CN-{issuer}-YYYY-NNNN` numbering series so credit notes don't collide with
+  invoices.
 - **Draft-only editing.** Amend a draft's metadata with `invoices edit` or
   its line items with `invoices items add|remove|edit`. Once issued, invoices
   are immutable — the correct path for corrections is a credit note, which
@@ -115,15 +118,15 @@ invoice products add design \
 invoice invoices new --client meridian --item design --due 30d
 
 # 5. Render + open
-invoice invoices render 2026-0001 --open
+invoice invoices render acme-2026-0001 --open
 
 # 6. Later: mark paid, clone for next month
-invoice invoices mark 2026-0001 paid
-invoice invoices duplicate 2026-0001
+invoice invoices mark acme-2026-0001 paid
+invoice invoices duplicate acme-2026-0001
 
 # 7. Need a refund? Credit note against the original. Positive refund
 # specs are stored as credits automatically:
-invoice invoices credit-note 2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
+invoice invoices credit-note acme-2026-0001 --item "Refund:1:500" --notes "Goodwill credit"
 
 # 8. Month-end accountant handoff
 invoice invoices export --from 2026-01-01 --to 2026-03-31 --format csv --out q1.csv
@@ -151,7 +154,7 @@ invoice invoices export --from 2026-01-01 --to 2026-03-31 --format csv --out q1.
 | `invoices export --from X --to Y --format csv\|json` | Accountant handoff |
 | `invoices delete <number> [--force]` | Delete an invoice (`--force` for non-draft) |
 | `template list\|preview <name>` | Inspect available templates |
-| `doctor` | Diagnose typst install, DB, templates |
+| `doctor` | Diagnose typst install, DB, templates, default issuer, numbering |
 | `agent-info` | Full JSON capability manifest |
 | `skill install` | Install embedded Claude/Codex/Gemini skill |
 | `update [--check]` | Self-update via brew or cargo |
@@ -199,6 +202,8 @@ contract:
 
 - Every command emits a `{version, status, data|error}` envelope when piped.
 - `invoice agent-info` returns a full capability + exit-code manifest.
+- `invoice doctor --json` reports setup, default issuer validity, and risky
+  multi-company numbering formats.
 - `invoice skill install` drops a ready-to-use skill file into
   `~/.claude/skills/invoice-cli/SKILL.md` (and the Codex/Gemini equivalents).
 
@@ -208,6 +213,11 @@ Typical agent workflow:
 USER:  "Bill Meridian for last month's design work"
 AGENT: invoice invoices duplicate $(invoice invoices list --json | jq -r '.data[0].number')
 ```
+
+Agents should use invoice numbers returned by JSON responses, not predict the
+next sequence. The CLI keeps numbers globally unique; if legacy issuers share a
+plain `{year}-{seq:04}` format, generation auto-prefixes the issuer slug on
+collision and `doctor` warns so you can clean up the formats.
 
 ## Architecture
 

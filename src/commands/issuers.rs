@@ -24,6 +24,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
             logo,
             output_dir,
             notes,
+            number_format,
         } => {
             let jur = Jurisdiction::from_str(&jurisdiction).ok_or_else(|| {
                 AppError::InvalidInput(format!(
@@ -52,7 +53,7 @@ pub fn run(cmd: IssuerCmd, ctx: Ctx) -> Result<()> {
                 default_template: template,
                 currency: Some(profile.currency.to_string()),
                 symbol: Some(profile.symbol.to_string()),
-                number_format: "{year}-{seq:04}".into(),
+                number_format: number_format.unwrap_or_else(|| "{issuer}-{year}-{seq:04}".into()),
                 logo_path: logo,
                 default_output_dir: output_dir,
                 default_notes: notes,

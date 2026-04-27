@@ -70,13 +70,16 @@ pub fn run(ctx: Ctx) -> Result<()> {
         message: format!("{} available: {}", templates.len(), templates.join(", ")),
     });
 
-    // db
+    // db + suite-level invariants
     match crate::db::open() {
-        Ok(_) => checks.push(Check {
-            name: "database".into(),
-            status: "pass",
-            message: format!("{} ok", config::db_path()?.display()),
-        }),
+        Ok(conn) => {
+            checks.push(Check {
+                name: "database".into(),
+                status: "pass",
+                message: format!("{} ok", config::db_path()?.display()),
+            });
+            add_suite_checks(&mut checks, &conn)?;
+        }
         Err(e) => checks.push(Check {
             name: "database".into(),
             status: "fail",
@@ -111,5 +114,84 @@ pub fn run(ctx: Ctx) -> Result<()> {
     if has_fail {
         return Err(AppError::Config("doctor found issues".into()));
     }
+    Ok(())
+}
+
+fn add_suite_checks(checks: &mut Vec<Check>, conn: &rusqlite::Connection) -> Result<()> {
+    let issuers = crate::db::issuer_list(conn)?;
+    if issuers.is_empty() {
+        checks.push(Check {
+            name: "issuers".into(),
+            status: "warn",
+            message: "no issuers configured. First run: invoice issuer add <slug> --name ... --address ...".into(),
+        });
+    } else {
+        checks.push(Check {
+            name: "issuers".into(),
+            status: "pass",
+            message: format!("{} configured", issuers.len()),
+        });
+    }
+
+    let cfg = config::load()?;
+    match cfg.default_issuer.as_deref() {
+        Some(slug) => match crate::db::issuer_by_slug(conn, slug) {
+            Ok(_) => checks.push(Check {
+                name: "default-issuer".into(),
+                status: "pass",
+                message: format!("config.default_issuer = {slug}"),
+            }),
+            Err(_) => checks.push(Check {
+                name: "default-issuer".into(),
+                status: "fail",
+                message: format!(
+                    "config.default_issuer points to missing issuer '{slug}'. Run: invoice config set default_issuer unset"
+                ),
+            }),
+        },
+        None if issuers.is_empty() => checks.push(Check {
+            name: "default-issuer".into(),
+            status: "warn",
+            message: "not set yet because no issuers exist".into(),
+        }),
+        None => checks.push(Check {
+            name: "default-issuer".into(),
+            status: "warn",
+            message: "not set. Agents must pass --as or use clients with default issuers.".into(),
+        }),
+    }
+
+    if issuers.len() > 1 {
+        use std::collections::BTreeMap;
+        let mut by_format: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for issuer in &issuers {
+            by_format
+                .entry(issuer.number_format.as_str())
+                .or_default()
+                .push(issuer.slug.as_str());
+        }
+        let risky: Vec<String> = by_format
+            .into_iter()
+            .filter(|(format, slugs)| slugs.len() > 1 && !format.contains("{issuer}"))
+            .map(|(format, slugs)| format!("{} share '{}'", slugs.join(", "), format))
+            .collect();
+        if risky.is_empty() {
+            checks.push(Check {
+                name: "numbering".into(),
+                status: "pass",
+                message: "multi-company number formats are distinct or include {issuer}".into(),
+            });
+        } else {
+            checks.push(Check {
+                name: "numbering".into(),
+                status: "warn",
+                message: format!(
+                    "{}. Invoice numbers are globally addressable; use --number-format '{{issuer}}-{{year}}-{{seq:04}}' for each issuer.",
+                    risky.join("; ")
+                ),
+            });
+        }
+    }
+
     Ok(())
 }

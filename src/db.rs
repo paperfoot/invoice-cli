@@ -491,30 +491,67 @@ pub fn next_invoice_number(
     year: i32,
     kind: &str,
 ) -> Result<String> {
-    let seq: i64 = conn
-        .query_row(
-            "SELECT next_seq FROM number_series
-               WHERE issuer_id = ?1 AND year = ?2 AND kind = ?3",
-            params![issuer.id, year, kind],
-            |r| r.get(0),
-        )
-        .optional()?
-        .unwrap_or(1);
-
-    conn.execute(
+    let seq: i64 = conn.query_row(
         "INSERT INTO number_series (issuer_id, year, kind, next_seq)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(issuer_id, year, kind) DO UPDATE SET next_seq = next_seq + 1",
-        params![issuer.id, year, kind, seq + 1],
+         VALUES (?1, ?2, ?3, 2)
+         ON CONFLICT(issuer_id, year, kind) DO UPDATE SET next_seq = next_seq + 1
+         RETURNING next_seq - 1",
+        params![issuer.id, year, kind],
+        |r| r.get(0),
     )?;
 
+    let out = format_document_number(issuer, year, seq, kind);
+    ensure_globally_unique_number(conn, issuer, &out)
+}
+
+fn format_document_number(issuer: &Issuer, year: i32, seq: i64, kind: &str) -> String {
     let mut out = issuer.number_format.clone();
+    out = out.replace("{issuer}", &issuer.slug);
     out = out.replace("{year}", &year.to_string());
     out = apply_sequence_format(&out, seq);
     if kind == "credit_note" {
         out = format!("CN-{out}");
     }
-    Ok(out)
+    out
+}
+
+fn ensure_globally_unique_number(
+    conn: &Connection,
+    issuer: &Issuer,
+    candidate: &str,
+) -> Result<String> {
+    if !invoice_number_exists(conn, candidate)? {
+        return Ok(candidate.to_string());
+    }
+
+    let prefixed = issuer_prefixed_number(&issuer.slug, candidate);
+    if !invoice_number_exists(conn, &prefixed)? {
+        return Ok(prefixed);
+    }
+
+    Err(AppError::InvalidInput(format!(
+        "generated invoice number '{candidate}' already exists globally. Set a unique issuer number format, e.g. `invoice issuer edit {} --number-format \"{}-{{year}}-{{seq:04}}\"`",
+        issuer.slug, issuer.slug
+    )))
+}
+
+fn invoice_number_exists(conn: &Connection, number: &str) -> Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM invoices WHERE number = ?1 LIMIT 1",
+            params![number],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
+fn issuer_prefixed_number(issuer_slug: &str, candidate: &str) -> String {
+    if let Some(rest) = candidate.strip_prefix("CN-") {
+        format!("CN-{issuer_slug}-{rest}")
+    } else {
+        format!("{issuer_slug}-{candidate}")
+    }
 }
 
 fn apply_sequence_format(format: &str, seq: i64) -> String {
@@ -1005,7 +1042,7 @@ pub fn invoice_item_edit(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_sequence_format, invoice_discount_minor, total_minor_from_bases};
+    use super::*;
     use crate::money::MinorUnits;
     use rust_decimal::Decimal;
     use std::collections::BTreeMap;
@@ -1022,6 +1059,35 @@ mod tests {
     }
 
     #[test]
+    fn supports_issuer_token_in_number_format() {
+        let issuer = test_issuer("paperfoot", "{issuer}-{year}-{seq:03}");
+        assert_eq!(
+            format_document_number(&issuer, 2026, 12, "invoice"),
+            "paperfoot-2026-012"
+        );
+    }
+
+    #[test]
+    fn prefixes_legacy_colliding_number_for_second_issuer() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut conn = open_at(tmp.path()).unwrap();
+
+        let mut alpha = test_issuer("alpha", "{year}-{seq:04}");
+        alpha.id = issuer_create(&conn, &alpha).unwrap();
+        let mut beta = test_issuer("beta", "{year}-{seq:04}");
+        beta.id = issuer_create(&conn, &beta).unwrap();
+
+        let client_id = client_create(&conn, &test_client()).unwrap();
+        let first = next_invoice_number(&conn, &alpha, 2026, "invoice").unwrap();
+        assert_eq!(first, "2026-0001");
+        let inv = test_invoice(first, alpha.id, client_id);
+        invoice_create(&mut conn, &inv).unwrap();
+
+        let second = next_invoice_number(&conn, &beta, 2026, "invoice").unwrap();
+        assert_eq!(second, "beta-2026-0001");
+    }
+
+    #[test]
     fn list_total_scales_tax_base_after_invoice_discount() {
         let mut bases = BTreeMap::new();
         bases.insert("20".to_string(), 10_000);
@@ -1030,5 +1096,73 @@ mod tests {
             crate::money::tax_amount(MinorUnits(base), rate).0
         });
         assert_eq!(total, 6_000);
+    }
+
+    fn test_issuer(slug: &str, number_format: &str) -> Issuer {
+        Issuer {
+            id: 0,
+            slug: slug.to_string(),
+            name: slug.to_string(),
+            legal_name: None,
+            jurisdiction: Jurisdiction::Uk,
+            tax_registered: false,
+            tax_id: None,
+            company_no: None,
+            tagline: None,
+            address: vec!["1 Test Street".into()],
+            email: None,
+            phone: None,
+            bank_details: None,
+            default_template: "vienna".into(),
+            currency: Some("GBP".into()),
+            symbol: Some("£".into()),
+            number_format: number_format.into(),
+            logo_path: None,
+            default_output_dir: None,
+            default_notes: None,
+        }
+    }
+
+    fn test_client() -> Client {
+        Client {
+            id: 0,
+            slug: "client".into(),
+            name: "Client".into(),
+            attn: None,
+            country: None,
+            tax_id: None,
+            address: vec!["1 Client Street".into()],
+            email: None,
+            notes: None,
+            default_issuer_slug: None,
+            default_template: None,
+        }
+    }
+
+    fn test_invoice(number: String, issuer_id: i64, client_id: i64) -> Invoice {
+        Invoice {
+            id: 0,
+            number,
+            issuer_id,
+            client_id,
+            issue_date: "2026-01-01".into(),
+            due_date: "2026-01-08".into(),
+            terms: "Pay in full".into(),
+            currency: "GBP".into(),
+            symbol: "£".into(),
+            tax_label: "VAT".into(),
+            status: "draft".into(),
+            notes: None,
+            reverse_charge: false,
+            pay_link: None,
+            issued_at: None,
+            paid_at: None,
+            total_minor: None,
+            kind: "invoice".into(),
+            credits_invoice_id: None,
+            discount_rate: None,
+            discount_fixed: None,
+            items: vec![],
+        }
     }
 }
