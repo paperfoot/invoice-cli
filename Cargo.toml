@@ -21,7 +21,7 @@ finance-core = "0.3"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 thiserror = "2"
 anyhow = "1"
 rusqlite = { version = "0.33", features = ["bundled", "chrono"] }
