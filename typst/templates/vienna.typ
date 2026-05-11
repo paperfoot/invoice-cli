@@ -78,7 +78,7 @@
   ],
 )
 
-#v(-2mm)
+#v(-2mm + 2pt)
 #align(right)[
   #fit-size(
     (9pt, 8.5pt, 8pt),
@@ -100,7 +100,7 @@
   columns: (1fr, 1fr),
   column-gutter: 14mm,
   party-block(d.client, theme, label-text: "Bill to"),
-  party-block(d.issuer, theme, label-text: "Bill from", show-name: false),
+  party-block(d.issuer, theme, label-text: "Bill from"),
 )
 
 #v(mm-sp.s)

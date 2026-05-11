@@ -79,7 +79,7 @@
 #let party-block(party, theme, label-text: "To", show-name: true) = {
   let mute = th(theme, "mute", rgb("#666"))
   let display = th(theme, "display-font", ("Helvetica Neue", "Helvetica", "Arial", "New Computer Modern"))
-  let has(k) = k in party and party.at(k) != none
+  let has(k) = k in party and party.at(k) != none and party.at(k) != ""
   lbl(theme, label-text)
   v(sp.s)
   if show-name {
